@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PED Tools | Login</title>
+    <style>
+        :root {
+            --blue: #007bff;
+            --blue-dark: #0056b3;
+            --red: #dc3545;
+            --gray-bg: #f0f2f5;
+            --gray-border: #d1d5db;
+            --gray-text: #555;
+            --white: #fff;
+            --radius: 8px;
+            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        *, *::before, *::after { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; }
+        body {
+            font-family: var(--font); background: var(--gray-bg); color: #333;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .login-card {
+            background: var(--white); border-radius: var(--radius);
+            box-shadow: 0 4px 24px rgba(0,0,0,0.1); padding: 40px;
+            width: 100%; max-width: 400px; text-align: center;
+        }
+        .login-card h1 {
+            margin: 0 0 8px; font-size: 1.5rem; color: var(--blue);
+        }
+        .login-card p {
+            margin: 0 0 24px; font-size: 0.9rem; color: var(--gray-text);
+        }
+        .field { margin-bottom: 16px; text-align: left; }
+        .field label {
+            display: block; font-weight: 600; margin-bottom: 6px;
+            font-size: 0.85rem;
+        }
+        .field input {
+            width: 100%; padding: 10px 14px; border: 1px solid var(--gray-border);
+            border-radius: 6px; font-size: 0.95rem; transition: border-color 0.2s;
+        }
+        .field input:focus { outline: none; border-color: var(--blue); }
+        .btn {
+            width: 100%; padding: 11px; border: none; border-radius: 6px;
+            font-size: 0.95rem; font-weight: 600; cursor: pointer;
+            color: var(--white); background: var(--blue);
+            transition: background 0.2s;
+        }
+        .btn:hover { background: var(--blue-dark); }
+        .error {
+            background: #fde8e8; color: var(--red); padding: 10px 14px;
+            border-radius: 6px; font-size: 0.85rem; margin-bottom: 16px;
+            border: 1px solid #f5c6cb;
+        }
+        .lock-icon { font-size: 2.5rem; margin-bottom: 12px; }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="lock-icon">&#128274;</div>
+        <h1>PED Tools</h1>
+        <p>Enter password to access the dashboard</p>
+
+        {% if error %}
+        <div class="error">{{ error }}</div>
+        {% endif %}
+
+        <form method="POST">
+            <div class="field">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password"
+                       placeholder="Enter your password" autofocus required />
+            </div>
+            <button type="submit" class="btn">Login</button>
+        </form>
+    </div>
+
+    <script>
+    document.querySelector('form').addEventListener('submit', function(e) {
+        var btn = this.querySelector('.btn');
+        btn.textContent = 'Logging in...';
+        btn.disabled = true;
+    });
+    </script>
+</body>
+</html>

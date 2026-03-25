@@ -25,7 +25,7 @@ load_dotenv(os.path.join(_BASE_DIR, ".env"))
 
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
-from flask import Flask, Response, g, jsonify, render_template, request
+from flask import Flask, Response, g, jsonify, redirect, render_template, request, session, url_for
 from simpleeval import EvalWithCompoundTypes
 
 import requests as http_requests
@@ -48,8 +48,10 @@ ALLOWED_PROXY_DOMAINS = [
 DEBUG = os.environ.get("PED_DEBUG", "false").lower() == "true"
 FORWARD_TIMEOUT = int(os.environ.get("PED_FORWARD_TIMEOUT", "30"))
 REQUEST_HISTORY_LIMIT = int(os.environ.get("PED_HISTORY_LIMIT", "100"))
+UI_PASSWORD = os.environ.get("PED_UI_PASSWORD", "")  # empty = no login required
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("PED_SECRET_KEY", "ped-tools-default-secret-change-me")
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -480,17 +482,46 @@ def log_access(f):
     return decorated
 
 
+def _is_authenticated() -> bool:
+    """Check if the current request is authenticated via session or Bearer token."""
+    # No password set = everything open
+    if not UI_PASSWORD and not API_TOKEN:
+        return True
+    # Session-based auth (UI)
+    if session.get("authenticated"):
+        return True
+    # Bearer token auth (API)
+    if API_TOKEN:
+        auth = request.headers.get("Authorization", "")
+        if auth == f"Bearer {API_TOKEN}":
+            return True
+    return False
+
+
 def require_auth(f):
-    """Simple Bearer-token gate. Skipped when API_TOKEN is empty."""
+    """Gate that checks session cookie OR Bearer token."""
 
     @wraps(f)
     def decorated(*args, **kwargs):
-        if not API_TOKEN:
+        if _is_authenticated():
             return f(*args, **kwargs)
-        auth = request.headers.get("Authorization", "")
-        if auth != f"Bearer {API_TOKEN}":
+        # For API requests, return 401 JSON
+        if request.is_json or request.headers.get("Accept") == "application/json":
             return jsonify({"error": "Unauthorized"}), 401
-        return f(*args, **kwargs)
+        # For browser requests, redirect to login
+        return redirect(url_for("login_page", next=request.path))
+
+    return decorated
+
+
+def require_login(f):
+    """Gate for UI pages — redirects to login if not authenticated."""
+
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if _is_authenticated():
+            return f(*args, **kwargs)
+        return redirect(url_for("login_page", next=request.path))
 
     return decorated
 
@@ -985,6 +1016,46 @@ def _resolve_iv(value: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Routes — Login / Logout
+# ---------------------------------------------------------------------------
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login_page():
+    """Login page. GET shows form, POST validates password."""
+    # If no password set, no login needed
+    if not UI_PASSWORD and not API_TOKEN:
+        return redirect(url_for("index"))
+
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        # Accept UI_PASSWORD or API_TOKEN as valid password
+        valid = False
+        if UI_PASSWORD and password == UI_PASSWORD:
+            valid = True
+        if API_TOKEN and password == API_TOKEN:
+            valid = True
+        if valid:
+            session["authenticated"] = True
+            session.permanent = True
+            next_url = request.args.get("next", "/")
+            logger.info("[AUTH] Login successful from %s", request.remote_addr)
+            return redirect(next_url)
+        else:
+            logger.warning("[AUTH] Failed login attempt from %s", request.remote_addr)
+            return render_template("login.html", error="Invalid password"), 401
+
+    return render_template("login.html", error=None)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    logger.info("[AUTH] Logout from %s", request.remote_addr)
+    return redirect(url_for("login_page"))
+
+
+# ---------------------------------------------------------------------------
 # Routes — Health Check
 # ---------------------------------------------------------------------------
 
@@ -1016,6 +1087,7 @@ def health_check():
 
 @app.route("/")
 @log_access
+@require_login
 def index():
     return render_template("index.html")
 
@@ -1581,12 +1653,14 @@ def proxy_request(identifier, endpoint):
 
 @app.route("/proxy/helper")
 @log_access
+@require_login
 def proxy_helper():
     return render_template("proxy_helper.html")
 
 
 @app.route("/proxy/")
 @log_access
+@require_login
 def proxy_server_page():
     return render_template("proxy_server.html")
 
