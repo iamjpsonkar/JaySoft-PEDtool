@@ -39,6 +39,21 @@
         }
         .topbar a:hover { background: rgba(255,255,255,0.15); }
 
+        /* --- Status bar --- */
+        .status-bar {
+            background: var(--white); border-bottom: 1px solid var(--gray-border);
+            padding: 6px 24px; display: flex; align-items: center; gap: 16px;
+            font-size: 0.8rem; color: var(--gray-text); flex-wrap: wrap;
+        }
+        .status-dot {
+            display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+            margin-right: 4px; vertical-align: middle;
+        }
+        .status-dot.ok { background: var(--green); }
+        .status-dot.err { background: var(--red); }
+        .status-dot.loading { background: var(--orange); }
+        .rate-limit-info { margin-left: auto; }
+
         /* --- Layout --- */
         .page { max-width: 1200px; margin: 0 auto; padding: 24px; }
         .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
@@ -55,7 +70,7 @@
         /* --- Form elements --- */
         label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85rem; }
         .hint { font-size: 0.78rem; color: var(--gray-text); margin-bottom: 8px; }
-        input[type="text"], input[type="url"], textarea, select {
+        input[type="text"], input[type="url"], input[type="number"], textarea, select {
             width: 100%; padding: 9px 12px; border: 1px solid var(--gray-border);
             border-radius: 6px; font-size: 0.9rem; font-family: var(--font);
             background: #fafafa; transition: border-color 0.2s;
@@ -81,6 +96,8 @@
         .btn-green:hover { background: var(--green-dark); }
         .btn-red { background: var(--red); }
         .btn-red:hover { background: var(--red-dark); }
+        .btn-orange { background: var(--orange); }
+        .btn-orange:hover { background: #e56b0a; }
         .btn-sm { padding: 5px 10px; font-size: 0.78rem; }
         .btn-outline {
             background: transparent; border: 1px solid var(--gray-border);
@@ -226,6 +243,89 @@
             background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px;
             font-family: var(--mono);
         }
+
+        /* --- Toggle switch --- */
+        .toggle-wrap { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+        .toggle-label { font-weight: 600; font-size: 0.85rem; }
+        .toggle {
+            position: relative; width: 44px; height: 24px; cursor: pointer;
+        }
+        .toggle input { opacity: 0; width: 0; height: 0; }
+        .toggle .slider {
+            position: absolute; inset: 0; background: var(--gray-border);
+            border-radius: 24px; transition: background 0.2s;
+        }
+        .toggle .slider::before {
+            content: ''; position: absolute; left: 3px; top: 3px;
+            width: 18px; height: 18px; border-radius: 50%;
+            background: var(--white); transition: transform 0.2s;
+        }
+        .toggle input:checked + .slider { background: var(--blue); }
+        .toggle input:checked + .slider::before { transform: translateX(20px); }
+
+        /* --- Condition builder rows --- */
+        .condition-row {
+            display: flex; gap: 8px; align-items: center; margin-bottom: 8px;
+            flex-wrap: wrap; padding: 10px; background: #f8f9fa;
+            border: 1px solid var(--gray-border); border-radius: 6px;
+        }
+        .condition-row select { width: 120px; flex: none; }
+        .condition-row input { flex: 1; min-width: 80px; }
+        .condition-row textarea { flex: 1; min-height: 60px; font-size: 0.8rem; }
+
+        /* --- Sequence step --- */
+        .sequence-step {
+            display: flex; gap: 8px; align-items: flex-start; margin-bottom: 8px;
+            padding: 10px; background: #f8f9fa;
+            border: 1px solid var(--gray-border); border-radius: 6px;
+        }
+        .sequence-step textarea { flex: 1; min-height: 60px; font-size: 0.8rem; }
+        .sequence-step .step-label {
+            font-weight: 700; font-size: 0.78rem; color: var(--blue);
+            min-width: 50px; padding-top: 10px;
+        }
+
+        /* --- History expandable row --- */
+        .history-detail {
+            display: none; background: #f8f9fa; padding: 12px;
+            border-bottom: 1px solid #eee;
+        }
+        .history-detail.visible { display: table-row; }
+        .history-detail td { padding: 12px; }
+        .history-detail pre {
+            background: #1e1e2e; color: #cdd6f4; padding: 10px; border-radius: 6px;
+            font-family: var(--mono); font-size: 0.78rem; white-space: pre-wrap;
+            word-break: break-word; margin: 4px 0 0; max-height: 200px; overflow-y: auto;
+        }
+        .history-detail-label {
+            font-weight: 600; font-size: 0.8rem; color: var(--blue-dark); margin-top: 8px;
+        }
+        .history-detail-label:first-child { margin-top: 0; }
+
+        .source-badge {
+            display: inline-block; padding: 2px 8px; border-radius: 4px;
+            font-size: 0.72rem; font-weight: 700; color: var(--white);
+        }
+        .source-mock { background: #6f42c1; }
+        .source-forward { background: var(--blue); }
+        .source-redirect { background: var(--orange); }
+        .source-error { background: var(--red); }
+
+        /* --- Section collapse --- */
+        .section-header {
+            display: flex; align-items: center; gap: 10px; cursor: pointer;
+            user-select: none;
+        }
+        .section-header h2 { margin: 0; }
+        .section-chevron {
+            transition: transform 0.2s; font-size: 0.8rem; color: var(--gray-text);
+        }
+        .section-chevron.collapsed { transform: rotate(-90deg); }
+        .section-body.collapsed { display: none; }
+
+        /* --- Inline form row --- */
+        .inline-form { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+        .inline-form .field { margin-bottom: 0; }
     </style>
 </head>
 <body>
@@ -235,8 +335,67 @@
         <a href="/">Home</a>
     </div>
 
+    <!-- Health & Rate Limit Status Bar -->
+    <div class="status-bar" id="statusBar">
+        <span><span class="status-dot loading" id="healthDot"></span> <span id="healthText">Checking...</span></span>
+        <span id="rateLimitDisplay" class="rate-limit-info" style="display:none;"></span>
+    </div>
+
     <div class="page">
-        <!-- Row 1: Register + Lookup side by side -->
+
+        <!-- ================================================================ -->
+        <!-- SECTION: Proxy List & Management                                 -->
+        <!-- ================================================================ -->
+        <div class="card full" style="margin-bottom:24px;">
+            <div class="section-header" onclick="toggleSection('proxyListBody','proxyListChevron')">
+                <span class="section-chevron" id="proxyListChevron">&#9660;</span>
+                <h2>Proxy List &amp; Management</h2>
+            </div>
+            <div id="proxyListBody" style="margin-top:14px;">
+                <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
+                    <button class="btn btn-blue btn-sm" onclick="loadProxyList()">Refresh List</button>
+                    <button class="btn btn-green btn-sm" onclick="exportAll()">Export All</button>
+                    <button class="btn btn-outline btn-sm" onclick="toggleImportSection()">Import</button>
+                </div>
+
+                <!-- Import Section (hidden by default) -->
+                <div id="importSection" style="display:none;margin-bottom:14px;padding:14px;background:#f8f9fa;border-radius:6px;border:1px solid var(--gray-border);">
+                    <label for="importJson">Paste Export JSON</label>
+                    <textarea id="importJson" style="min-height:100px;" placeholder='[{"identifier":"my-proxy","api_domain":"https://...","mocks":{...}}]'></textarea>
+                    <div style="margin-top:8px;display:flex;gap:8px;">
+                        <button class="btn btn-green btn-sm" onclick="doImport()">Import</button>
+                        <button class="btn btn-outline btn-sm" onclick="toggleImportSection()">Cancel</button>
+                    </div>
+                </div>
+
+                <!-- Clone inline form (hidden by default) -->
+                <div id="cloneSection" style="display:none;margin-bottom:14px;padding:14px;background:#f8f9fa;border-radius:6px;border:1px solid var(--gray-border);">
+                    <div class="inline-form">
+                        <div class="field">
+                            <label for="cloneSource">Source Identifier</label>
+                            <input type="text" id="cloneSource" placeholder="source-proxy" style="width:200px;" />
+                        </div>
+                        <div class="field">
+                            <label for="cloneTarget">New Identifier</label>
+                            <input type="text" id="cloneTarget" placeholder="cloned-proxy" style="width:200px;" />
+                        </div>
+                        <button class="btn btn-blue btn-sm" onclick="doClone()" style="margin-bottom:0;">Clone</button>
+                        <button class="btn btn-outline btn-sm" onclick="document.getElementById('cloneSection').style.display='none'" style="margin-bottom:0;">Cancel</button>
+                    </div>
+                </div>
+
+                <div id="proxyListContainer">
+                    <div class="empty-state"><p>Click "Refresh List" to load all proxies.</p></div>
+                </div>
+
+                <!-- Export response area -->
+                <div id="exportResponse" class="response-box" style="margin-top:14px;"></div>
+            </div>
+        </div>
+
+        <!-- ================================================================ -->
+        <!-- Row 1: Register + Lookup side by side                            -->
+        <!-- ================================================================ -->
         <div class="grid">
             <!-- Register Proxy -->
             <div class="card">
@@ -267,7 +426,9 @@
             </div>
         </div>
 
-        <!-- Row 2: Mock Builder (full width) -->
+        <!-- ================================================================ -->
+        <!-- Row 2: Mock Builder (full width)                                 -->
+        <!-- ================================================================ -->
         <div style="margin-top:24px;">
             <div class="card full">
                 <h2>2. Create Mock Response</h2>
@@ -300,6 +461,63 @@
                     Exact path <code>/users/123</code> |
                     Dynamic segments <code>/orders/&lt;id&gt;/items</code> |
                     Full URL <code>https://api.example.com/users/123</code>
+                </div>
+
+                <!-- Mock Enhancement Fields -->
+                <div class="grid" style="gap:14px;margin-bottom:14px;">
+                    <div style="display:flex;gap:14px;">
+                        <div class="field" style="flex:1;">
+                            <label for="mock_delay">Response Delay (ms)</label>
+                            <div class="hint">Add a delay before the mock response is returned</div>
+                            <input type="number" id="mock_delay" placeholder="0" min="0" max="30000" />
+                        </div>
+                        <div class="field" style="flex:1;">
+                            <label for="mock_status_code">Custom Status Code</label>
+                            <div class="hint">Override the default 200 status code</div>
+                            <input type="number" id="mock_status_code" placeholder="200" min="100" max="599" />
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label for="mock_headers">Response Headers (JSON)</label>
+                        <div class="hint">Custom headers to include in the response, e.g. {"X-Custom": "value"}</div>
+                        <textarea id="mock_headers" style="min-height:60px;" placeholder='{"Content-Type": "application/json"}'></textarea>
+                    </div>
+                </div>
+
+                <!-- Sequence Mode Toggle -->
+                <div class="toggle-wrap">
+                    <label class="toggle">
+                        <input type="checkbox" id="sequenceToggle" onchange="onSequenceToggle()" />
+                        <span class="slider"></span>
+                    </label>
+                    <span class="toggle-label">Sequence Mode</span>
+                    <span class="hint" style="margin:0;">(Return different responses on consecutive calls)</span>
+                </div>
+                <div id="sequenceBuilder" style="display:none;margin-bottom:14px;padding:14px;background:#f8f9fa;border-radius:6px;border:1px solid var(--gray-border);">
+                    <label>Sequence Steps</label>
+                    <div class="hint" style="margin-bottom:10px;">Each step is returned in order. After all steps, the last one repeats.</div>
+                    <div id="sequenceSteps"></div>
+                    <button class="btn btn-outline btn-sm" onclick="addSequenceStep()">+ Add Step</button>
+                </div>
+
+                <!-- Conditional Mode Toggle -->
+                <div class="toggle-wrap">
+                    <label class="toggle">
+                        <input type="checkbox" id="conditionalToggle" onchange="onConditionalToggle()" />
+                        <span class="slider"></span>
+                    </label>
+                    <span class="toggle-label">Conditional Mode</span>
+                    <span class="hint" style="margin:0;">(Return different responses based on request conditions)</span>
+                </div>
+                <div id="conditionalBuilder" style="display:none;margin-bottom:14px;padding:14px;background:#f8f9fa;border-radius:6px;border:1px solid var(--gray-border);">
+                    <label>Conditions</label>
+                    <div class="hint" style="margin-bottom:10px;">First matching condition wins. A default response is used if none match.</div>
+                    <div id="conditionRows"></div>
+                    <button class="btn btn-outline btn-sm" onclick="addConditionRow()" style="margin-bottom:10px;">+ Add Condition</button>
+                    <div class="field">
+                        <label for="conditionDefault">Default Response (JSON)</label>
+                        <textarea id="conditionDefault" style="min-height:60px;" placeholder='{"error": "no condition matched"}'></textarea>
+                    </div>
                 </div>
 
                 <!-- Tabs: Visual Builder vs Raw JSON -->
@@ -368,7 +586,9 @@
             </div>
         </div>
 
-        <!-- Row 3: Existing mocks + Response -->
+        <!-- ================================================================ -->
+        <!-- Row 3: Existing mocks + Response                                 -->
+        <!-- ================================================================ -->
         <div style="margin-top:24px;">
             <div class="card full">
                 <h2>Existing Mocks</h2>
@@ -382,6 +602,31 @@
                 <div id="mocksContainer">
                     <div class="empty-state">
                         <p>Enter a proxy identifier and click Load to see its mocks.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================================================================ -->
+        <!-- SECTION: Request History                                         -->
+        <!-- ================================================================ -->
+        <div style="margin-top:24px;">
+            <div class="card full">
+                <div class="section-header" onclick="toggleSection('historyBody','historyChevron')">
+                    <span class="section-chevron" id="historyChevron">&#9660;</span>
+                    <h2>Request History</h2>
+                </div>
+                <div id="historyBody" style="margin-top:14px;">
+                    <div class="inline-form" style="margin-bottom:14px;">
+                        <div class="field" style="flex:0 0 240px;">
+                            <label for="history_proxy_id">Proxy Identifier</label>
+                            <input type="text" id="history_proxy_id" placeholder="my-proxy" />
+                        </div>
+                        <button class="btn btn-blue btn-sm" onclick="loadHistory()">Load History</button>
+                        <button class="btn btn-red btn-sm" onclick="clearHistory()">Clear History</button>
+                    </div>
+                    <div id="historyContainer">
+                        <div class="empty-state"><p>Enter a proxy identifier and click "Load History" to view request logs.</p></div>
                     </div>
                 </div>
             </div>
@@ -460,6 +705,60 @@
         if (!res.ok) throw { status: res.status, data };
         return data;
     }
+
+    /* ------------------------------------------------------------------ */
+    /*  Section toggle                                                    */
+    /* ------------------------------------------------------------------ */
+
+    function toggleSection(bodyId, chevronId) {
+        var body = document.getElementById(bodyId);
+        var chevron = document.getElementById(chevronId);
+        body.classList.toggle('collapsed');
+        chevron.classList.toggle('collapsed');
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Health check & Status bar                                         */
+    /* ------------------------------------------------------------------ */
+
+    async function checkHealth() {
+        var dot = document.getElementById('healthDot');
+        var text = document.getElementById('healthText');
+        try {
+            var data = await api('/health', 'GET');
+            dot.className = 'status-dot ok';
+            text.textContent = 'Server: ' + (data.status || 'healthy') +
+                ' | DB: ' + (data.database || 'ok') +
+                ' | Proxies: ' + (data.proxy_count !== undefined ? data.proxy_count : '?') +
+                ' | Mocks: ' + (data.mock_count !== undefined ? data.mock_count : '?');
+        } catch (e) {
+            dot.className = 'status-dot err';
+            text.textContent = 'Server: unreachable';
+        }
+    }
+
+    async function loadRateLimitInfo(identifier) {
+        if (!identifier) {
+            document.getElementById('rateLimitDisplay').style.display = 'none';
+            return;
+        }
+        try {
+            var data = await api('/proxy/ratelimit/' + encodeURIComponent(identifier) + '/', 'GET');
+            var el = document.getElementById('rateLimitDisplay');
+            el.style.display = 'inline';
+            if (data.max_requests === 'unlimited') {
+                el.textContent = 'Rate limit: unlimited';
+            } else {
+                el.textContent = 'Rate limit: ' + data.current_count + '/' + data.max_requests +
+                    ' (' + data.remaining + ' remaining, ' + data.window_seconds + 's window)';
+            }
+        } catch (e) {
+            document.getElementById('rateLimitDisplay').style.display = 'none';
+        }
+    }
+
+    // Check health on load
+    checkHealth();
 
     /* ------------------------------------------------------------------ */
     /*  View Modal                                                        */
@@ -653,6 +952,131 @@
     updatePreview();
 
     /* ------------------------------------------------------------------ */
+    /*  Sequence Mode                                                     */
+    /* ------------------------------------------------------------------ */
+
+    var _sequenceStepCount = 0;
+
+    function onSequenceToggle() {
+        var on = document.getElementById('sequenceToggle').checked;
+        document.getElementById('sequenceBuilder').style.display = on ? 'block' : 'none';
+        if (on && _sequenceStepCount === 0) {
+            addSequenceStep();
+            addSequenceStep();
+        }
+    }
+
+    function addSequenceStep(value) {
+        _sequenceStepCount++;
+        var idx = _sequenceStepCount;
+        var val = value ? (typeof value === 'string' ? value : JSON.stringify(value, null, 2)) : '';
+        var html = '<div class="sequence-step" id="seq-step-' + idx + '">' +
+            '<span class="step-label">Step ' + idx + '</span>' +
+            '<textarea class="seq-response" placeholder=\'{"status": "ok"}\'>' + escapeHtml(val) + '</textarea>' +
+            '<button class="btn btn-red btn-sm" onclick="removeSequenceStep(this)" title="Remove">&times;</button>' +
+            '</div>';
+        document.getElementById('sequenceSteps').insertAdjacentHTML('beforeend', html);
+    }
+
+    function removeSequenceStep(btn) {
+        btn.closest('.sequence-step').remove();
+        // Re-number steps
+        var steps = document.querySelectorAll('#sequenceSteps .sequence-step');
+        steps.forEach(function(step, i) {
+            step.querySelector('.step-label').textContent = 'Step ' + (i + 1);
+        });
+        _sequenceStepCount = steps.length;
+    }
+
+    function getSequenceSteps() {
+        var steps = [];
+        document.querySelectorAll('#sequenceSteps .seq-response').forEach(function(ta) {
+            var val = ta.value.trim();
+            if (val) {
+                try { steps.push(JSON.parse(val)); }
+                catch (e) { steps.push(val); }
+            }
+        });
+        return steps;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Conditional Mode                                                  */
+    /* ------------------------------------------------------------------ */
+
+    var _conditionRowCount = 0;
+
+    function onConditionalToggle() {
+        var on = document.getElementById('conditionalToggle').checked;
+        document.getElementById('conditionalBuilder').style.display = on ? 'block' : 'none';
+        if (on && _conditionRowCount === 0) {
+            addConditionRow();
+        }
+    }
+
+    function addConditionRow() {
+        _conditionRowCount++;
+        var idx = _conditionRowCount;
+        var html = '<div class="condition-row" id="cond-row-' + idx + '">' +
+            '<select class="cond-source" style="width:120px;">' +
+                '<option value="header">Header</option>' +
+                '<option value="json_body">JSON Body</option>' +
+                '<option value="query_param">Query Param</option>' +
+                '<option value="path">Path</option>' +
+                '<option value="method">Method</option>' +
+            '</select>' +
+            '<input type="text" class="cond-field" placeholder="field name" style="flex:0 0 140px;" />' +
+            '<select class="cond-operator" style="width:110px;">' +
+                '<option value="equals">equals</option>' +
+                '<option value="not_equals">not equals</option>' +
+                '<option value="contains">contains</option>' +
+                '<option value="starts_with">starts with</option>' +
+                '<option value="ends_with">ends with</option>' +
+                '<option value="regex">regex</option>' +
+                '<option value="exists">exists</option>' +
+            '</select>' +
+            '<input type="text" class="cond-value" placeholder="value" style="flex:0 0 140px;" />' +
+            '<div style="width:100%;margin-top:6px;">' +
+                '<label style="font-size:0.78rem;">Then respond with (JSON):</label>' +
+                '<textarea class="cond-response" placeholder=\'{"matched": true}\' style="width:100%;min-height:50px;"></textarea>' +
+            '</div>' +
+            '<button class="btn btn-red btn-sm" onclick="removeConditionRow(this)" title="Remove" style="align-self:flex-start;">&times;</button>' +
+            '</div>';
+        document.getElementById('conditionRows').insertAdjacentHTML('beforeend', html);
+    }
+
+    function removeConditionRow(btn) {
+        btn.closest('.condition-row').remove();
+        _conditionRowCount = document.querySelectorAll('#conditionRows .condition-row').length;
+    }
+
+    function getConditions() {
+        var conditions = [];
+        document.querySelectorAll('#conditionRows .condition-row').forEach(function(row) {
+            var source = row.querySelector('.cond-source').value;
+            var field = row.querySelector('.cond-field').value.trim();
+            var operator = row.querySelector('.cond-operator').value;
+            var value = row.querySelector('.cond-value').value.trim();
+            var responseText = row.querySelector('.cond-response').value.trim();
+            var response;
+            try { response = JSON.parse(responseText); }
+            catch (e) { response = responseText || {}; }
+            conditions.push({
+                source: source,
+                field: field,
+                operator: operator,
+                value: value,
+                response: response
+            });
+        });
+        var defaultText = document.getElementById('conditionDefault').value.trim();
+        var defaultResp;
+        try { defaultResp = JSON.parse(defaultText); }
+        catch (e) { defaultResp = defaultText || {}; }
+        return { conditions: conditions, default: defaultResp };
+    }
+
+    /* ------------------------------------------------------------------ */
     /*  Raw JSON placeholder insert                                       */
     /* ------------------------------------------------------------------ */
 
@@ -668,7 +1092,7 @@
     }
 
     /* ------------------------------------------------------------------ */
-    /*  API calls                                                         */
+    /*  API calls — Register, Lookup                                      */
     /* ------------------------------------------------------------------ */
 
     async function registerProxy() {
@@ -686,6 +1110,9 @@
             document.getElementById('mock_proxy_id').value = data.identifier;
             document.getElementById('mocks_proxy_id').value = data.identifier;
             document.getElementById('lookup_id').value = data.identifier;
+            document.getElementById('history_proxy_id').value = data.identifier;
+            loadProxyList();
+            loadRateLimitInfo(data.identifier);
         } catch (e) {
             showToast((e.data && e.data.error) || 'Registration failed', 'error');
             showResponse('mainResponse', e.data || e);
@@ -699,11 +1126,16 @@
         try {
             var data = await api('/proxy/get/' + encodeURIComponent(id) + '/', 'GET');
             showResponse('lookupResponse', data);
+            loadRateLimitInfo(id);
         } catch (e) {
             showToast('Lookup failed', 'error');
             showResponse('lookupResponse', e.data || e);
         }
     }
+
+    /* ------------------------------------------------------------------ */
+    /*  API calls — Mock create / test                                    */
+    /* ------------------------------------------------------------------ */
 
     function getMockPayload() {
         var proxyId = document.getElementById('mock_proxy_id').value.trim();
@@ -713,6 +1145,30 @@
         if (!proxyId || !endpoint) {
             showToast('Proxy Identifier and Endpoint are required', 'error');
             return null;
+        }
+
+        // Check if sequence mode is active
+        if (document.getElementById('sequenceToggle').checked) {
+            var steps = getSequenceSteps();
+            if (steps.length < 2) {
+                showToast('Sequence mode needs at least 2 steps', 'error');
+                return null;
+            }
+            var mock = { _sequence: steps };
+            mock = applyMockEnhancements(mock);
+            return { proxy_identifier: proxyId, end_point: endpoint, method: method, mock: mock };
+        }
+
+        // Check if conditional mode is active
+        if (document.getElementById('conditionalToggle').checked) {
+            var condData = getConditions();
+            if (condData.conditions.length === 0) {
+                showToast('Conditional mode needs at least 1 condition', 'error');
+                return null;
+            }
+            var mock = { _conditions: condData.conditions, _default: condData.default };
+            mock = applyMockEnhancements(mock);
+            return { proxy_identifier: proxyId, end_point: endpoint, method: method, mock: mock };
         }
 
         var isVisual = document.getElementById('tab-visual').classList.contains('active');
@@ -726,12 +1182,38 @@
             catch(err) { showToast('Invalid JSON in mock response', 'error'); return null; }
         }
 
+        mock = applyMockEnhancements(mock);
+
         return {
             proxy_identifier: proxyId,
             end_point: endpoint,
             method: method,
             mock: mock
         };
+    }
+
+    function applyMockEnhancements(mock) {
+        var delay = parseInt(document.getElementById('mock_delay').value, 10);
+        var statusCode = parseInt(document.getElementById('mock_status_code').value, 10);
+        var headersText = document.getElementById('mock_headers').value.trim();
+
+        if (delay && delay > 0) {
+            mock._delay_ms = delay;
+        }
+
+        if (headersText) {
+            try {
+                mock.headers = JSON.parse(headersText);
+            } catch (e) {
+                // silently ignore invalid JSON
+            }
+        }
+
+        if (statusCode && statusCode !== 200) {
+            mock = { status_code: statusCode, body: mock };
+        }
+
+        return mock;
     }
 
     async function createMock() {
@@ -805,6 +1287,7 @@
         try {
             var data = await api('/proxy/get/' + encodeURIComponent(id) + '/', 'GET');
             renderMocksTable(data.mocked_requests || {});
+            loadRateLimitInfo(id);
         } catch (e) {
             showToast('Failed to load mocks', 'error');
         }
@@ -867,19 +1350,93 @@
         document.getElementById('mock_endpoint').value = endpoint;
         document.getElementById('mock_method').value = method;
 
+        // Reset enhancement fields
+        document.getElementById('mock_delay').value = '';
+        document.getElementById('mock_status_code').value = '';
+        document.getElementById('mock_headers').value = '';
+        document.getElementById('sequenceToggle').checked = false;
+        onSequenceToggle();
+        document.getElementById('conditionalToggle').checked = false;
+        onConditionalToggle();
+
+        // Detect enhanced mock structures and populate accordingly
+        var mockBody = bodyObj;
+        if (bodyObj && typeof bodyObj === 'object') {
+            // Detect status_code wrapper
+            if (bodyObj.status_code && bodyObj.body) {
+                document.getElementById('mock_status_code').value = bodyObj.status_code;
+                mockBody = bodyObj.body;
+            }
+            // Detect delay
+            if (mockBody._delay_ms) {
+                document.getElementById('mock_delay').value = mockBody._delay_ms;
+                var cleaned = Object.assign({}, mockBody);
+                delete cleaned._delay_ms;
+                mockBody = cleaned;
+            }
+            // Detect headers
+            if (mockBody.headers && typeof mockBody.headers === 'object') {
+                document.getElementById('mock_headers').value = JSON.stringify(mockBody.headers, null, 2);
+            }
+            // Detect sequence
+            if (mockBody._sequence && Array.isArray(mockBody._sequence)) {
+                document.getElementById('sequenceToggle').checked = true;
+                onSequenceToggle();
+                document.getElementById('sequenceSteps').innerHTML = '';
+                _sequenceStepCount = 0;
+                mockBody._sequence.forEach(function(step) {
+                    addSequenceStep(step);
+                });
+                // Load into raw JSON tab
+                switchTab('raw');
+                document.getElementById('mock_json_raw').value = JSON.stringify(bodyObj, null, 2);
+                window.scrollTo({ top: document.getElementById('mock_proxy_id').offsetTop - 80, behavior: 'smooth' });
+                showToast('Sequence mock loaded into editor', 'success');
+                return;
+            }
+            // Detect conditional
+            if (mockBody._conditions && Array.isArray(mockBody._conditions)) {
+                document.getElementById('conditionalToggle').checked = true;
+                onConditionalToggle();
+                document.getElementById('conditionRows').innerHTML = '';
+                _conditionRowCount = 0;
+                mockBody._conditions.forEach(function(cond) {
+                    addConditionRow();
+                    var lastRow = document.querySelector('#conditionRows .condition-row:last-child');
+                    if (lastRow) {
+                        lastRow.querySelector('.cond-source').value = cond.source || 'header';
+                        lastRow.querySelector('.cond-field').value = cond.field || '';
+                        lastRow.querySelector('.cond-operator').value = cond.operator || 'equals';
+                        lastRow.querySelector('.cond-value').value = cond.value || '';
+                        lastRow.querySelector('.cond-response').value = typeof cond.response === 'object' ? JSON.stringify(cond.response, null, 2) : (cond.response || '');
+                    }
+                });
+                if (mockBody._default) {
+                    document.getElementById('conditionDefault').value = typeof mockBody._default === 'object' ? JSON.stringify(mockBody._default, null, 2) : mockBody._default;
+                }
+                switchTab('raw');
+                document.getElementById('mock_json_raw').value = JSON.stringify(bodyObj, null, 2);
+                window.scrollTo({ top: document.getElementById('mock_proxy_id').offsetTop - 80, behavior: 'smooth' });
+                showToast('Conditional mock loaded into editor', 'success');
+                return;
+            }
+        }
+
         // Load into raw JSON tab
         switchTab('raw');
-        document.getElementById('mock_json_raw').value = JSON.stringify(bodyObj, null, 2);
+        document.getElementById('mock_json_raw').value = JSON.stringify(mockBody, null, 2);
 
         // Also load into visual builder (clear existing rows first)
         var rowsContainer = document.getElementById('mockRows');
         rowsContainer.innerHTML = '';
-        loadIntoVisualBuilder(bodyObj);
+        if (mockBody && typeof mockBody === 'object' && !Array.isArray(mockBody)) {
+            loadIntoVisualBuilder(mockBody);
+        }
         updatePreview();
 
         // Scroll to form
         window.scrollTo({ top: document.getElementById('mock_proxy_id').offsetTop - 80, behavior: 'smooth' });
-        showToast('Mock loaded into editor — modify and click "Create Mock" to save', 'success');
+        showToast('Mock loaded into editor — modify and click "Save Mock" to save', 'success');
     }
 
     // --- Delete with confirmation ---
@@ -944,6 +1501,248 @@
             cancelDelete(idx, document.querySelector('#mock-row-' + idx + ' td:last-child button'));
         }
     }
+
+    /* ------------------------------------------------------------------ */
+    /*  Proxy List & Management                                           */
+    /* ------------------------------------------------------------------ */
+
+    async function loadProxyList() {
+        try {
+            var data = await api('/proxy/list/', 'GET');
+            renderProxyList(data.proxies || data || []);
+        } catch (e) {
+            showToast('Failed to load proxy list', 'error');
+        }
+    }
+
+    function renderProxyList(proxies) {
+        var container = document.getElementById('proxyListContainer');
+        if (!proxies || proxies.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>No proxies registered yet.</p></div>';
+            return;
+        }
+        var html = '<table class="mock-table">' +
+            '<thead><tr><th>Identifier</th><th>API Domain</th><th>Mocks</th><th>Created</th><th>Actions</th></tr></thead><tbody>';
+        proxies.forEach(function(p, idx) {
+            html += '<tr id="proxy-row-' + idx + '">' +
+                '<td style="font-family:var(--mono);font-size:0.85rem;font-weight:600;">' + escapeHtml(p.identifier) + '</td>' +
+                '<td style="font-family:var(--mono);font-size:0.82rem;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(p.api_domain) + '</td>' +
+                '<td style="text-align:center;">' + (p.mock_count || 0) + '</td>' +
+                '<td style="font-size:0.82rem;color:var(--gray-text);">' + escapeHtml(p.created_at || '') + '</td>' +
+                '<td style="white-space:nowrap;">' +
+                    '<button class="btn btn-blue btn-sm" onclick="loadMocksForProxy(\'' + escapeAttr(p.identifier) + '\')" title="Load mocks for this proxy">Load Mocks</button> ' +
+                    '<button class="btn btn-outline btn-sm" onclick="startClone(\'' + escapeAttr(p.identifier) + '\')" title="Clone this proxy">Clone</button> ' +
+                    '<button class="btn btn-outline btn-sm" onclick="exportProxy(\'' + escapeAttr(p.identifier) + '\')" title="Export this proxy">Export</button> ' +
+                    '<button class="btn btn-outline btn-sm" id="proxy-del-' + idx + '" onclick="confirmDeleteProxy(' + idx + ',\'' + escapeAttr(p.identifier) + '\')" style="color:var(--red);border-color:var(--red);" title="Delete this proxy">Delete</button>' +
+                '</td>' +
+            '</tr>';
+        });
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    function loadMocksForProxy(identifier) {
+        document.getElementById('mocks_proxy_id').value = identifier;
+        document.getElementById('mock_proxy_id').value = identifier;
+        document.getElementById('history_proxy_id').value = identifier;
+        loadMocks();
+        loadRateLimitInfo(identifier);
+        // Scroll to mocks section
+        document.getElementById('mocksContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function startClone(sourceId) {
+        document.getElementById('cloneSource').value = sourceId;
+        document.getElementById('cloneTarget').value = '';
+        document.getElementById('cloneSection').style.display = 'block';
+        document.getElementById('cloneTarget').focus();
+    }
+
+    async function doClone() {
+        var source = document.getElementById('cloneSource').value.trim();
+        var target = document.getElementById('cloneTarget').value.trim();
+        if (!source || !target) { showToast('Both source and target identifiers are required', 'error'); return; }
+
+        try {
+            var data = await api('/proxy/clone/', 'POST', {
+                source_identifier: source,
+                target_identifier: target
+            });
+            showToast('Cloned "' + source + '" to "' + target + '" (' + (data.mock_count || 0) + ' mocks)', 'success');
+            document.getElementById('cloneSection').style.display = 'none';
+            loadProxyList();
+        } catch (e) {
+            showToast((e.data && e.data.error) || 'Clone failed', 'error');
+        }
+    }
+
+    async function exportProxy(identifier) {
+        try {
+            var data = await api('/proxy/export/' + encodeURIComponent(identifier) + '/', 'GET');
+            showResponse('exportResponse', data);
+        } catch (e) {
+            showToast('Export failed', 'error');
+        }
+    }
+
+    async function exportAll() {
+        try {
+            var data = await api('/proxy/export/all/', 'GET');
+            showResponse('exportResponse', data);
+        } catch (e) {
+            showToast('Export failed', 'error');
+        }
+    }
+
+    function toggleImportSection() {
+        var el = document.getElementById('importSection');
+        el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function doImport() {
+        var raw = document.getElementById('importJson').value.trim();
+        if (!raw) { showToast('Paste JSON to import', 'error'); return; }
+        var parsed;
+        try { parsed = JSON.parse(raw); }
+        catch (e) { showToast('Invalid JSON', 'error'); return; }
+
+        try {
+            var data = await api('/proxy/import/', 'POST', parsed);
+            showToast('Import successful', 'success');
+            showResponse('exportResponse', data);
+            document.getElementById('importSection').style.display = 'none';
+            document.getElementById('importJson').value = '';
+            loadProxyList();
+        } catch (e) {
+            showToast((e.data && e.data.error) || 'Import failed', 'error');
+            showResponse('exportResponse', e.data || e);
+        }
+    }
+
+    function confirmDeleteProxy(idx, identifier) {
+        var btn = document.getElementById('proxy-del-' + idx);
+        if (!btn) return;
+        var td = btn.parentElement;
+        var original = td.innerHTML;
+        td.innerHTML =
+            '<div class="confirm-delete">' +
+                '<span>Delete proxy?</span>' +
+                '<button class="btn btn-red btn-sm" onclick="doDeleteProxy(\'' + escapeAttr(identifier) + '\')">Yes</button> ' +
+                '<button class="btn btn-outline btn-sm" onclick="cancelDeleteProxy(this)">No</button>' +
+            '</div>';
+        td.dataset.originalHtml = original;
+    }
+
+    function cancelDeleteProxy(btn) {
+        var td = btn.closest('td');
+        if (td && td.dataset.originalHtml) {
+            td.innerHTML = td.dataset.originalHtml;
+        }
+    }
+
+    async function doDeleteProxy(identifier) {
+        try {
+            await api('/proxy/delete/' + encodeURIComponent(identifier) + '/', 'DELETE');
+            showToast('Proxy "' + identifier + '" deleted', 'success');
+            loadProxyList();
+        } catch (e) {
+            showToast((e.data && e.data.error) || 'Delete failed', 'error');
+            loadProxyList();
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Request History                                                    */
+    /* ------------------------------------------------------------------ */
+
+    var _historyData = [];
+
+    async function loadHistory() {
+        var id = document.getElementById('history_proxy_id').value.trim();
+        if (!id) { showToast('Identifier is required', 'error'); return; }
+
+        try {
+            var data = await api('/proxy/history/' + encodeURIComponent(id) + '/', 'GET');
+            _historyData = data.history || data || [];
+            renderHistory(_historyData);
+            loadRateLimitInfo(id);
+        } catch (e) {
+            showToast('Failed to load history', 'error');
+        }
+    }
+
+    async function clearHistory() {
+        var id = document.getElementById('history_proxy_id').value.trim();
+        if (!id) { showToast('Identifier is required', 'error'); return; }
+        if (!confirm('Clear all request history for "' + id + '"?')) return;
+
+        try {
+            var data = await api('/proxy/history/' + encodeURIComponent(id) + '/clear/', 'POST');
+            showToast('History cleared (' + (data.deleted || 0) + ' entries)', 'success');
+            _historyData = [];
+            renderHistory([]);
+        } catch (e) {
+            showToast((e.data && e.data.error) || 'Clear failed', 'error');
+        }
+    }
+
+    function renderHistory(history) {
+        var container = document.getElementById('historyContainer');
+        if (!history || history.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>No request history for this proxy.</p></div>';
+            return;
+        }
+        var html = '<table class="mock-table">' +
+            '<thead><tr><th>Timestamp</th><th>Method</th><th>Endpoint</th><th>Source</th><th>Status</th><th>Duration</th></tr></thead><tbody>';
+        history.forEach(function(h, idx) {
+            var sourceClass = 'source-' + (h.source || 'forward');
+            html += '<tr style="cursor:pointer;" onclick="toggleHistoryDetail(' + idx + ')">' +
+                '<td style="font-size:0.82rem;color:var(--gray-text);white-space:nowrap;">' + escapeHtml(h.created_at || '') + '</td>' +
+                '<td><span class="method-badge method-' + (h.method || 'GET') + '">' + escapeHtml(h.method || '') + '</span></td>' +
+                '<td style="font-family:var(--mono);font-size:0.82rem;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(h.endpoint || '') + '</td>' +
+                '<td><span class="source-badge ' + sourceClass + '">' + escapeHtml(h.source || 'forward') + '</span></td>' +
+                '<td>' + (h.response_status !== null && h.response_status !== undefined ? '<span class="method-badge ' + (h.response_status < 400 ? 'method-GET' : 'method-DELETE') + '">' + h.response_status + '</span>' : '-') + '</td>' +
+                '<td style="font-size:0.82rem;">' + (h.duration_ms !== null && h.duration_ms !== undefined ? h.duration_ms + ' ms' : '-') + '</td>' +
+            '</tr>';
+            // Detail row (hidden)
+            html += '<tr class="history-detail" id="hist-detail-' + idx + '">' +
+                '<td colspan="6">' +
+                    '<div class="history-detail-label">Request Headers</div>' +
+                    '<pre>' + escapeHtml(formatJsonSafe(h.request_headers)) + '</pre>' +
+                    '<div class="history-detail-label">Request Body</div>' +
+                    '<pre>' + escapeHtml(h.request_body || '(empty)') + '</pre>' +
+                    '<div class="history-detail-label">Response Body</div>' +
+                    '<pre>' + escapeHtml(h.response_body || '(empty)') + '</pre>' +
+                    (h.query_params ? '<div class="history-detail-label">Query Params</div><pre>' + escapeHtml(h.query_params) + '</pre>' : '') +
+                '</td>' +
+            '</tr>';
+        });
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    function formatJsonSafe(val) {
+        if (!val) return '(empty)';
+        if (typeof val === 'string') {
+            try { return JSON.stringify(JSON.parse(val), null, 2); }
+            catch (e) { return val; }
+        }
+        try { return JSON.stringify(val, null, 2); }
+        catch (e) { return String(val); }
+    }
+
+    function toggleHistoryDetail(idx) {
+        var row = document.getElementById('hist-detail-' + idx);
+        if (row) {
+            row.classList.toggle('visible');
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Auto-load proxy list on page load                                 */
+    /* ------------------------------------------------------------------ */
+    loadProxyList();
+
     </script>
 </body>
 </html>

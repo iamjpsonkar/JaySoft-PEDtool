@@ -98,6 +98,8 @@
         }
         .method-GET { background: var(--green); }
         .method-POST { background: var(--blue); }
+        .method-DELETE { background: var(--red); }
+        .method-ANY { background: var(--orange); }
 
         /* --- Columns --- */
         .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
@@ -173,14 +175,48 @@
                 <li><strong>Point your client</strong> to <code>/proxy/&lt;identifier&gt;/</code> instead of the real API</li>
             </ol>
 
-            <h3>Endpoints</h3>
+            <h3>Core Endpoints</h3>
             <ul class="toc">
                 <li><a href="#ep-create">POST /proxy/create/</a> &mdash; Register a new proxy</li>
                 <li><a href="#ep-mock-create">POST /proxy/mock/create/</a> &mdash; Create or update a mock</li>
                 <li><a href="#ep-get">GET /proxy/get/&lt;id&gt;/</a> &mdash; View proxy config &amp; mocks</li>
                 <li><a href="#ep-proxy">ANY /proxy/&lt;id&gt;/&lt;path&gt;</a> &mdash; Proxy or mock a request</li>
+            </ul>
+
+            <h3>Management Endpoints</h3>
+            <ul class="toc">
+                <li><a href="#ep-delete">DELETE /proxy/delete/&lt;identifier&gt;/</a> &mdash; Delete a proxy and all its mocks</li>
+                <li><a href="#ep-list">GET /proxy/list/</a> &mdash; List all proxies with mock counts</li>
+                <li><a href="#ep-clone">POST /proxy/clone/</a> &mdash; Clone a proxy</li>
+                <li><a href="#ep-mock-delete">POST /proxy/mock/delete/</a> &mdash; Delete a specific mock</li>
+                <li><a href="#ep-sequence-reset">POST /proxy/sequence/reset/</a> &mdash; Reset sequence counters</li>
+            </ul>
+
+            <h3>Import / Export</h3>
+            <ul class="toc">
+                <li><a href="#ep-export">GET /proxy/export/&lt;identifier&gt;/</a> &mdash; Export proxy + mocks as JSON</li>
+                <li><a href="#ep-export-all">GET /proxy/export/all/</a> &mdash; Export all proxies</li>
+                <li><a href="#ep-import">POST /proxy/import/</a> &mdash; Import proxies from JSON</li>
+            </ul>
+
+            <h3>History &amp; Monitoring</h3>
+            <ul class="toc">
+                <li><a href="#ep-history">GET /proxy/history/&lt;identifier&gt;/</a> &mdash; Get request history</li>
+                <li><a href="#ep-history-clear">POST /proxy/history/&lt;identifier&gt;/clear/</a> &mdash; Clear request history</li>
+                <li><a href="#ep-ratelimit">GET /proxy/ratelimit/&lt;identifier&gt;/</a> &mdash; Get rate limit status</li>
+                <li><a href="#ep-health">GET /health</a> &mdash; Health check</li>
+            </ul>
+
+            <h3>Advanced Features</h3>
+            <ul class="toc">
                 <li><a href="#placeholders">Dynamic Placeholders Reference</a></li>
                 <li><a href="#patterns">URL Pattern Matching</a></li>
+                <li><a href="#feat-delay">Response Delay</a></li>
+                <li><a href="#feat-status">Custom Status Codes</a></li>
+                <li><a href="#feat-sequence">Mock Sequencing</a></li>
+                <li><a href="#feat-conditionals">Mock Conditionals</a></li>
+                <li><a href="#feat-ratelimit">Rate Limiting</a></li>
+                <li><a href="#feat-history">Request History</a></li>
             </ul>
         </div>
 
@@ -437,6 +473,715 @@ curl http://localhost:8000/proxy/payments-v2/orders/123/status</pre>
                 If a URL has the same prefix repeated (e.g. <code>/api/items/1/items/2</code>), use
                 <code>pathparamget(items_2)</code> to get the second occurrence.
             </p>
+        </div>
+
+        <!-- ===================== MANAGEMENT ENDPOINTS ===================== -->
+
+        <!-- DELETE /proxy/delete/<identifier>/ -->
+        <div class="accordion" id="ep-delete">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+                <span class="arrow">&#9654;</span>
+                <span class="method-badge method-DELETE">DELETE</span>
+                <span>/proxy/delete/&lt;identifier&gt;/</span>
+            </div>
+            <div class="accordion-body">
+                <p>Delete a proxy and all its associated mocks permanently.</p>
+                <div class="note">
+                    <strong>Warning:</strong> This action is irreversible. All mocks, request history, and configuration for this proxy will be removed.
+                </div>
+                <div class="cols">
+                    <div>
+                        <h3>cURL</h3>
+                        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>curl -X DELETE http://localhost:8000/proxy/delete/payments-v2/</pre>
+                    </div>
+                    <div>
+                        <h3>Response</h3>
+                        <pre>{
+  "message": "proxy 'payments-v2' deleted successfully",
+  "mocks_removed": 3
+}</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- GET /proxy/list/ -->
+        <div class="accordion" id="ep-list">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+                <span class="arrow">&#9654;</span>
+                <span class="method-badge method-GET">GET</span>
+                <span>/proxy/list/</span>
+            </div>
+            <div class="accordion-body">
+                <p>List all registered proxies with their API domains and mock counts.</p>
+                <div class="cols">
+                    <div>
+                        <h3>cURL</h3>
+                        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>curl http://localhost:8000/proxy/list/</pre>
+                    </div>
+                    <div>
+                        <h3>Response</h3>
+                        <pre>{
+  "proxies": [
+    {
+      "identifier": "payments-v2",
+      "api_domain": "https://api.example.com",
+      "mock_count": 5
+    },
+    {
+      "identifier": "auth-service",
+      "api_domain": "https://auth.example.com",
+      "mock_count": 2
+    }
+  ],
+  "total": 2
+}</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- POST /proxy/clone/ -->
+        <div class="accordion" id="ep-clone">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+                <span class="arrow">&#9654;</span>
+                <span class="method-badge method-POST">POST</span>
+                <span>/proxy/clone/</span>
+            </div>
+            <div class="accordion-body">
+                <p>Clone an existing proxy and all its mocks to a new identifier.</p>
+                <table class="ref-table">
+                    <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+                    <tr><td><code>source_identifier</code></td><td>string</td><td>Yes</td><td>Identifier of the proxy to clone from</td></tr>
+                    <tr><td><code>target_identifier</code></td><td>string</td><td>Yes</td><td>Identifier for the new cloned proxy</td></tr>
+                </table>
+                <div class="cols">
+                    <div>
+                        <h3>Request</h3>
+                        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>{
+  "source_identifier": "payments-v2",
+  "target_identifier": "payments-v2-staging"
+}</pre>
+                    </div>
+                    <div>
+                        <h3>Response</h3>
+                        <pre>{
+  "message": "proxy cloned successfully",
+  "source": "payments-v2",
+  "target": "payments-v2-staging",
+  "mocks_cloned": 5
+}</pre>
+                    </div>
+                </div>
+                <h3>cURL</h3>
+                <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>curl -X POST http://localhost:8000/proxy/clone/ \
+  -H 'Content-Type: application/json' \
+  -d '{"source_identifier": "payments-v2", "target_identifier": "payments-v2-staging"}'</pre>
+            </div>
+        </div>
+
+        <!-- POST /proxy/mock/delete/ -->
+        <div class="accordion" id="ep-mock-delete">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+                <span class="arrow">&#9654;</span>
+                <span class="method-badge method-POST">POST</span>
+                <span>/proxy/mock/delete/</span>
+            </div>
+            <div class="accordion-body">
+                <p>Delete a specific mock from a proxy by endpoint and method.</p>
+                <table class="ref-table">
+                    <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+                    <tr><td><code>proxy_identifier</code></td><td>string</td><td>Yes</td><td>The proxy that owns the mock</td></tr>
+                    <tr><td><code>end_point</code></td><td>string</td><td>Yes</td><td>The mocked endpoint path</td></tr>
+                    <tr><td><code>method</code></td><td>string</td><td>Yes</td><td>HTTP method (GET, POST, PUT, PATCH, DELETE)</td></tr>
+                </table>
+                <div class="cols">
+                    <div>
+                        <h3>Request</h3>
+                        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>{
+  "proxy_identifier": "payments-v2",
+  "end_point": "/orders/&lt;id&gt;/status",
+  "method": "GET"
+}</pre>
+                    </div>
+                    <div>
+                        <h3>Response</h3>
+                        <pre>{
+  "message": "mock deleted successfully",
+  "proxy_identifier": "payments-v2",
+  "end_point": "/orders/&lt;id&gt;/status",
+  "method": "GET"
+}</pre>
+                    </div>
+                </div>
+                <h3>cURL</h3>
+                <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>curl -X POST http://localhost:8000/proxy/mock/delete/ \
+  -H 'Content-Type: application/json' \
+  -d '{"proxy_identifier": "payments-v2", "end_point": "/orders/<id>/status", "method": "GET"}'</pre>
+            </div>
+        </div>
+
+        <!-- POST /proxy/sequence/reset/ -->
+        <div class="accordion" id="ep-sequence-reset">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+                <span class="arrow">&#9654;</span>
+                <span class="method-badge method-POST">POST</span>
+                <span>/proxy/sequence/reset/</span>
+            </div>
+            <div class="accordion-body">
+                <p>Reset sequence counters for mock sequencing. You can reset all sequences for a proxy, or target a specific endpoint.</p>
+                <table class="ref-table">
+                    <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+                    <tr><td><code>proxy_identifier</code></td><td>string</td><td>Yes</td><td>The proxy whose counters to reset</td></tr>
+                    <tr><td><code>end_point</code></td><td>string</td><td>No</td><td>Reset only this endpoint's counter (all if omitted)</td></tr>
+                </table>
+                <div class="cols">
+                    <div>
+                        <h3>Request (reset all)</h3>
+                        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>{
+  "proxy_identifier": "payments-v2"
+}</pre>
+                    </div>
+                    <div>
+                        <h3>Request (reset one)</h3>
+                        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>{
+  "proxy_identifier": "payments-v2",
+  "end_point": "/orders/&lt;id&gt;/status"
+}</pre>
+                    </div>
+                </div>
+                <h3>Response</h3>
+                <pre>{
+  "message": "sequence counters reset",
+  "proxy_identifier": "payments-v2",
+  "counters_reset": 3
+}</pre>
+            </div>
+        </div>
+
+        <!-- ===================== IMPORT / EXPORT ===================== -->
+
+        <!-- GET /proxy/export/<identifier>/ -->
+        <div class="accordion" id="ep-export">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+                <span class="arrow">&#9654;</span>
+                <span class="method-badge method-GET">GET</span>
+                <span>/proxy/export/&lt;identifier&gt;/</span>
+            </div>
+            <div class="accordion-body">
+                <p>Export a single proxy and all its mocks as a JSON document. Useful for backup or sharing configurations.</p>
+                <div class="cols">
+                    <div>
+                        <h3>cURL</h3>
+                        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>curl http://localhost:8000/proxy/export/payments-v2/</pre>
+                    </div>
+                    <div>
+                        <h3>Response</h3>
+                        <pre>{
+  "identifier": "payments-v2",
+  "api_domain": "https://api.example.com",
+  "mocked_requests": {
+    "/orders/&lt;id&gt;/status": {
+      "GET": {
+        "order_id": "pathparamget(orders)",
+        "status": "confirmed"
+      }
+    }
+  }
+}</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- GET /proxy/export/all/ -->
+        <div class="accordion" id="ep-export-all">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+                <span class="arrow">&#9654;</span>
+                <span class="method-badge method-GET">GET</span>
+                <span>/proxy/export/all/</span>
+            </div>
+            <div class="accordion-body">
+                <p>Export all proxies and their mocks as a single JSON document.</p>
+                <div class="cols">
+                    <div>
+                        <h3>cURL</h3>
+                        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>curl http://localhost:8000/proxy/export/all/</pre>
+                    </div>
+                    <div>
+                        <h3>Response</h3>
+                        <pre>{
+  "proxies": {
+    "payments-v2": {
+      "api_domain": "https://api.example.com",
+      "mocked_requests": { ... }
+    },
+    "auth-service": {
+      "api_domain": "https://auth.example.com",
+      "mocked_requests": { ... }
+    }
+  },
+  "total": 2
+}</pre>
+                    </div>
+                </div>
+                <div class="note">
+                    <strong>Tip:</strong> Pipe the output to a file for backup: <code>curl http://localhost:8000/proxy/export/all/ | python -m json.tool &gt; backup.json</code>
+                </div>
+            </div>
+        </div>
+
+        <!-- POST /proxy/import/ -->
+        <div class="accordion" id="ep-import">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+                <span class="arrow">&#9654;</span>
+                <span class="method-badge method-POST">POST</span>
+                <span>/proxy/import/</span>
+            </div>
+            <div class="accordion-body">
+                <p>Import proxies from JSON. Supports both single-proxy and bulk import formats.</p>
+
+                <h3>Single Proxy Import</h3>
+                <table class="ref-table">
+                    <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+                    <tr><td><code>identifier</code></td><td>string</td><td>Yes</td><td>Proxy identifier</td></tr>
+                    <tr><td><code>api_domain</code></td><td>string</td><td>Yes</td><td>Base URL of the real API</td></tr>
+                    <tr><td><code>mocked_requests</code></td><td>object</td><td>Yes</td><td>Mock definitions keyed by endpoint</td></tr>
+                </table>
+                <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>{
+  "identifier": "payments-v2",
+  "api_domain": "https://api.example.com",
+  "mocked_requests": {
+    "/orders/&lt;id&gt;/status": {
+      "GET": { "status": "confirmed" }
+    }
+  }
+}</pre>
+
+                <h3>Bulk Import</h3>
+                <table class="ref-table">
+                    <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+                    <tr><td><code>proxies</code></td><td>object</td><td>Yes</td><td>Map of identifier &rarr; proxy config (same format as export/all output)</td></tr>
+                </table>
+                <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>{
+  "proxies": {
+    "payments-v2": {
+      "api_domain": "https://api.example.com",
+      "mocked_requests": {
+        "/orders/&lt;id&gt;/status": {
+          "GET": { "status": "confirmed" }
+        }
+      }
+    },
+    "auth-service": {
+      "api_domain": "https://auth.example.com",
+      "mocked_requests": {}
+    }
+  }
+}</pre>
+
+                <h3>Response</h3>
+                <pre>{
+  "message": "import completed",
+  "imported": 2,
+  "identifiers": ["payments-v2", "auth-service"]
+}</pre>
+
+                <h3>cURL (single)</h3>
+                <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>curl -X POST http://localhost:8000/proxy/import/ \
+  -H 'Content-Type: application/json' \
+  -d @exported-proxy.json</pre>
+
+                <div class="note">
+                    <strong>Tip:</strong> You can export from one environment and import into another to replicate mock setups across teams.
+                </div>
+            </div>
+        </div>
+
+        <!-- ===================== HISTORY & MONITORING ===================== -->
+
+        <!-- GET /proxy/history/<identifier>/ -->
+        <div class="accordion" id="ep-history">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+                <span class="arrow">&#9654;</span>
+                <span class="method-badge method-GET">GET</span>
+                <span>/proxy/history/&lt;identifier&gt;/</span>
+            </div>
+            <div class="accordion-body">
+                <p>Retrieve the request history for a proxy. Returns the most recent requests first.</p>
+                <table class="ref-table">
+                    <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+                    <tr><td><code>limit</code></td><td>query param</td><td>50</td><td>Maximum number of history entries to return</td></tr>
+                </table>
+                <div class="cols">
+                    <div>
+                        <h3>cURL</h3>
+                        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>curl http://localhost:8000/proxy/history/payments-v2/?limit=10</pre>
+                    </div>
+                    <div>
+                        <h3>Response</h3>
+                        <pre>{
+  "identifier": "payments-v2",
+  "history": [
+    {
+      "timestamp": "2026-03-25T10:30:00Z",
+      "method": "GET",
+      "path": "/orders/123/status",
+      "headers": { "Authorization": "Bearer ..." },
+      "body": null,
+      "status_code": 200,
+      "duration_ms": 12,
+      "source": "mock"
+    }
+  ],
+  "total": 1
+}</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- POST /proxy/history/<identifier>/clear/ -->
+        <div class="accordion" id="ep-history-clear">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+                <span class="arrow">&#9654;</span>
+                <span class="method-badge method-POST">POST</span>
+                <span>/proxy/history/&lt;identifier&gt;/clear/</span>
+            </div>
+            <div class="accordion-body">
+                <p>Clear all stored request history for a proxy.</p>
+                <div class="cols">
+                    <div>
+                        <h3>cURL</h3>
+                        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>curl -X POST http://localhost:8000/proxy/history/payments-v2/clear/</pre>
+                    </div>
+                    <div>
+                        <h3>Response</h3>
+                        <pre>{
+  "message": "history cleared",
+  "identifier": "payments-v2",
+  "entries_removed": 47
+}</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- GET /proxy/ratelimit/<identifier>/ -->
+        <div class="accordion" id="ep-ratelimit">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+                <span class="arrow">&#9654;</span>
+                <span class="method-badge method-GET">GET</span>
+                <span>/proxy/ratelimit/&lt;identifier&gt;/</span>
+            </div>
+            <div class="accordion-body">
+                <p>Check the current rate limit status for a proxy.</p>
+                <div class="cols">
+                    <div>
+                        <h3>cURL</h3>
+                        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>curl http://localhost:8000/proxy/ratelimit/payments-v2/</pre>
+                    </div>
+                    <div>
+                        <h3>Response</h3>
+                        <pre>{
+  "identifier": "payments-v2",
+  "rate_limit": {
+    "max_requests": 100,
+    "window_seconds": 60,
+    "current_count": 23,
+    "remaining": 77,
+    "resets_at": "2026-03-25T10:31:00Z"
+  }
+}</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- GET /health -->
+        <div class="accordion" id="ep-health">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+                <span class="arrow">&#9654;</span>
+                <span class="method-badge method-GET">GET</span>
+                <span>/health</span>
+            </div>
+            <div class="accordion-body">
+                <p>Health check endpoint. Returns the server status and basic statistics.</p>
+                <div class="cols">
+                    <div>
+                        <h3>cURL</h3>
+                        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>curl http://localhost:8000/health</pre>
+                    </div>
+                    <div>
+                        <h3>Response</h3>
+                        <pre>{
+  "status": "healthy",
+  "uptime_seconds": 3600,
+  "proxies_count": 5,
+  "total_mocks": 23
+}</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===================== ADVANCED FEATURES ===================== -->
+
+        <!-- Response Delay -->
+        <div class="card" id="feat-delay">
+            <h2>Response Delay</h2>
+            <p>
+                Simulate network latency by adding a <code>_delay_ms</code> field to your mock response.
+                The proxy will wait the specified number of milliseconds before returning the response.
+            </p>
+            <h3>Example Mock</h3>
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>{
+  "proxy_identifier": "payments-v2",
+  "end_point": "/orders/&lt;id&gt;/status",
+  "method": "GET",
+  "mock": {
+    "_delay_ms": 2000,
+    "order_id": "pathparamget(orders)",
+    "status": "processing"
+  }
+}</pre>
+            <div class="note">
+                <strong>Note:</strong> The <code>_delay_ms</code> field is consumed by the proxy and will <strong>not</strong> appear in the response body. The delay is applied before the response is sent to the client.
+            </div>
+            <div class="flow">
+                <div class="flow-step">Request arrives</div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step">Mock matched</div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step alt">Wait _delay_ms</div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step">Return response</div>
+            </div>
+        </div>
+
+        <!-- Custom Status Codes -->
+        <div class="card" id="feat-status">
+            <h2>Custom Status Codes</h2>
+            <p>
+                By default, mocks return HTTP 200. To return a different status code or custom headers,
+                use the structured response format with <code>status_code</code>, <code>body</code>, and <code>headers</code>.
+            </p>
+            <h3>Example Mock</h3>
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>{
+  "proxy_identifier": "payments-v2",
+  "end_point": "/orders",
+  "method": "POST",
+  "mock": {
+    "status_code": 201,
+    "body": {
+      "order_id": "digit(8)",
+      "message": "Order created successfully"
+    },
+    "headers": {
+      "X-Request-Id": "alnum([4,4,4,4])",
+      "Location": "/orders/12345"
+    }
+  }
+}</pre>
+            <table class="ref-table">
+                <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+                <tr><td><code>status_code</code></td><td>integer</td><td>HTTP status code to return (e.g. 201, 400, 404, 500)</td></tr>
+                <tr><td><code>body</code></td><td>object</td><td>The actual response body sent to the client</td></tr>
+                <tr><td><code>headers</code></td><td>object</td><td>Additional response headers to include</td></tr>
+            </table>
+            <div class="note">
+                <strong>Note:</strong> If the mock is a plain object without <code>status_code</code>, <code>body</code>, and <code>headers</code> keys, the entire object is returned as the body with status 200.
+            </div>
+        </div>
+
+        <!-- Mock Sequencing -->
+        <div class="card" id="feat-sequence">
+            <h2>Mock Sequencing</h2>
+            <p>
+                Define a list of responses instead of a single object. Each successive call to the endpoint
+                returns the next response in the list. After the last response, it cycles back to the first.
+            </p>
+            <h3>Example Mock</h3>
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>{
+  "proxy_identifier": "payments-v2",
+  "end_point": "/orders/&lt;id&gt;/status",
+  "method": "GET",
+  "mock": [
+    { "status": "pending",    "progress": 0   },
+    { "status": "processing", "progress": 50  },
+    { "status": "completed",  "progress": 100 }
+  ]
+}</pre>
+            <div class="flow">
+                <div class="flow-step">Call 1</div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step alt">{"status": "pending"}</div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step">Call 2</div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step alt">{"status": "processing"}</div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step">Call 3</div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step alt">{"status": "completed"}</div>
+            </div>
+            <p>Call 4 cycles back to <code>{"status": "pending"}</code> and so on.</p>
+            <div class="note">
+                <strong>Tip:</strong> Use <a href="#ep-sequence-reset">POST /proxy/sequence/reset/</a> to reset the counter back to the first response at any time.
+            </div>
+        </div>
+
+        <!-- Mock Conditionals -->
+        <div class="card" id="feat-conditionals">
+            <h2>Mock Conditionals</h2>
+            <p>
+                Return different responses based on request properties. Define conditions that check
+                values from the JSON body, headers, or query parameters, and match them using operators.
+            </p>
+            <h3>Structure</h3>
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>{
+  "proxy_identifier": "payments-v2",
+  "end_point": "/orders",
+  "method": "POST",
+  "mock": {
+    "conditions": true,
+    "responses": [
+      {
+        "when": [
+          { "source": "json", "key": "amount", "operator": "gt", "value": 1000 }
+        ],
+        "then": {
+          "status_code": 400,
+          "body": { "error": "Amount exceeds limit" }
+        }
+      },
+      {
+        "when": [
+          { "source": "header", "key": "X-Priority", "operator": "eq", "value": "high" },
+          { "source": "json", "key": "currency", "operator": "eq", "value": "USD" }
+        ],
+        "then": {
+          "order_id": "digit(8)",
+          "priority": "high",
+          "currency": "USD"
+        }
+      },
+      {
+        "when": [
+          { "source": "param", "key": "dry_run", "operator": "exists" }
+        ],
+        "then": {
+          "message": "Dry run - no order created"
+        }
+      }
+    ],
+    "default": {
+      "order_id": "digit(8)",
+      "status": "created"
+    }
+  }
+}</pre>
+            <div class="note">
+                <strong>Note:</strong> Conditions within a single <code>when</code> array are combined with AND logic.
+                The first matching <code>responses</code> entry wins. If none match, the <code>default</code> response is used.
+            </div>
+
+            <h3>Condition Sources</h3>
+            <table class="ref-table">
+                <tr><th>Source</th><th>Description</th><th>Example</th></tr>
+                <tr><td><code>json</code></td><td>Value from the JSON request body</td><td><code>{"source": "json", "key": "amount", ...}</code></td></tr>
+                <tr><td><code>header</code></td><td>Value from a request header</td><td><code>{"source": "header", "key": "X-Priority", ...}</code></td></tr>
+                <tr><td><code>param</code></td><td>Value from a query parameter</td><td><code>{"source": "param", "key": "dry_run", ...}</code></td></tr>
+            </table>
+
+            <h3>Operators</h3>
+            <table class="ref-table">
+                <tr><th>Operator</th><th>Description</th><th>Example</th></tr>
+                <tr><td><code>eq</code></td><td>Equal to value</td><td><code>{"operator": "eq", "value": "USD"}</code></td></tr>
+                <tr><td><code>neq</code></td><td>Not equal to value</td><td><code>{"operator": "neq", "value": "cancelled"}</code></td></tr>
+                <tr><td><code>contains</code></td><td>String contains value</td><td><code>{"operator": "contains", "value": "admin"}</code></td></tr>
+                <tr><td><code>exists</code></td><td>Key is present (any value)</td><td><code>{"operator": "exists"}</code></td></tr>
+                <tr><td><code>not_exists</code></td><td>Key is not present</td><td><code>{"operator": "not_exists"}</code></td></tr>
+                <tr><td><code>gt</code></td><td>Greater than (numeric)</td><td><code>{"operator": "gt", "value": 1000}</code></td></tr>
+                <tr><td><code>lt</code></td><td>Less than (numeric)</td><td><code>{"operator": "lt", "value": 0}</code></td></tr>
+            </table>
+        </div>
+
+        <!-- Rate Limiting -->
+        <div class="card" id="feat-ratelimit">
+            <h2>Rate Limiting</h2>
+            <p>
+                The proxy supports per-proxy rate limiting to simulate API throttling. When a proxy exceeds
+                the configured request limit within the time window, subsequent requests receive a
+                <code>429 Too Many Requests</code> response.
+            </p>
+
+            <h3>Configuration</h3>
+            <p>Rate limiting is configured via environment variables:</p>
+            <table class="ref-table">
+                <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+                <tr><td><code>PED_RATE_LIMIT_MAX</code></td><td>100</td><td>Maximum requests allowed per window</td></tr>
+                <tr><td><code>PED_RATE_LIMIT_WINDOW</code></td><td>60</td><td>Time window in seconds</td></tr>
+            </table>
+
+            <h3>429 Response</h3>
+            <pre>{
+  "error": "rate limit exceeded",
+  "retry_after_seconds": 37
+}</pre>
+
+            <div class="flow">
+                <div class="flow-step">Request arrives</div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step">Check rate limit counter</div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step alt">Under limit? Process normally</div>
+            </div>
+            <div class="flow">
+                <div class="flow-step">Over limit?</div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step" style="background:#ffeaea;color:#a00;">Return 429 Too Many Requests</div>
+            </div>
+
+            <div class="note">
+                <strong>Tip:</strong> Use <a href="#ep-ratelimit">GET /proxy/ratelimit/&lt;identifier&gt;/</a> to check the current rate limit status without consuming a request.
+            </div>
+        </div>
+
+        <!-- Request History -->
+        <div class="card" id="feat-history">
+            <h2>Request History</h2>
+            <p>
+                Every request proxied through the server is logged with full details. This is useful for
+                debugging, testing assertions, and understanding traffic patterns.
+            </p>
+
+            <h3>What Gets Logged</h3>
+            <table class="ref-table">
+                <tr><th>Field</th><th>Description</th></tr>
+                <tr><td><code>timestamp</code></td><td>ISO 8601 timestamp of the request</td></tr>
+                <tr><td><code>method</code></td><td>HTTP method (GET, POST, etc.)</td></tr>
+                <tr><td><code>path</code></td><td>Request path</td></tr>
+                <tr><td><code>headers</code></td><td>Request headers</td></tr>
+                <tr><td><code>body</code></td><td>Request body (if present)</td></tr>
+                <tr><td><code>status_code</code></td><td>Response status code returned</td></tr>
+                <tr><td><code>duration_ms</code></td><td>Time taken to process the request in milliseconds</td></tr>
+                <tr><td><code>source</code></td><td>Whether response came from <code>mock</code> or <code>proxy</code></td></tr>
+            </table>
+
+            <div class="flow">
+                <div class="flow-step">Request arrives</div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step">Process (mock or proxy)</div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step alt">Log to history</div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step">Return response</div>
+            </div>
+
+            <div class="note">
+                <strong>Endpoints:</strong> Use <a href="#ep-history">GET /proxy/history/&lt;identifier&gt;/</a> to retrieve history and <a href="#ep-history-clear">POST /proxy/history/&lt;identifier&gt;/clear/</a> to clear it.
+            </div>
         </div>
     </div>
 
