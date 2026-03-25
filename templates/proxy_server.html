@@ -331,9 +331,14 @@
 <body>
     <div class="topbar">
         <h1>Proxy Server &amp; Mock Builder</h1>
-        <a href="/proxy/manage/">Manage Proxies</a>
-        <a href="/proxy/helper">Documentation</a>
+        <a href="/proxy/helper">Docs</a>
         <a href="/">Home</a>
+        {% if session.get('authenticated') %}
+        <a href="/proxy/manage/">Manage</a>
+        <a href="/logout" style="margin-left:auto;opacity:0.8;">Logout</a>
+        {% else %}
+        <a href="/login" style="margin-left:auto;">Login</a>
+        {% endif %}
     </div>
 
     <div class="page">
