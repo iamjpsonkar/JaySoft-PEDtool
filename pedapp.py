@@ -9,7 +9,10 @@ import random
 import re
 import sqlite3
 import string
+import time
+import threading
 from base64 import b64decode, b64encode
+from datetime import datetime, timedelta
 from functools import wraps
 from urllib.parse import urlparse
 
@@ -43,6 +46,8 @@ ALLOWED_PROXY_DOMAINS = [
     if d.strip()
 ]
 DEBUG = os.environ.get("PED_DEBUG", "false").lower() == "true"
+FORWARD_TIMEOUT = int(os.environ.get("PED_FORWARD_TIMEOUT", "30"))
+REQUEST_HISTORY_LIMIT = int(os.environ.get("PED_HISTORY_LIMIT", "100"))
 
 app = Flask(__name__)
 
@@ -103,6 +108,33 @@ def init_db():
 
         CREATE INDEX IF NOT EXISTS idx_mocks_proxy ON mocks(proxy_id);
         CREATE INDEX IF NOT EXISTS idx_mocks_lookup ON mocks(proxy_id, endpoint, method);
+
+        CREATE TABLE IF NOT EXISTS request_history (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            proxy_id    TEXT NOT NULL,
+            endpoint    TEXT NOT NULL,
+            method      TEXT NOT NULL,
+            request_headers TEXT,
+            request_body    TEXT,
+            query_params    TEXT,
+            response_status INTEGER,
+            response_body   TEXT,
+            source          TEXT NOT NULL DEFAULT 'forward',
+            duration_ms     INTEGER,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_history_proxy ON request_history(proxy_id);
+        CREATE INDEX IF NOT EXISTS idx_history_time ON request_history(created_at);
+
+        CREATE TABLE IF NOT EXISTS mock_sequences (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            proxy_id    TEXT NOT NULL,
+            endpoint    TEXT NOT NULL,
+            method      TEXT NOT NULL,
+            call_count  INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(proxy_id, endpoint, method)
+        );
         """
     )
     conn.commit()
@@ -110,7 +142,9 @@ def init_db():
     logger.info("Database initialized at %s", DB_PATH)
 
 
-# --- DB helper functions ---
+# ---------------------------------------------------------------------------
+# DB helper functions — Proxies & Mocks
+# ---------------------------------------------------------------------------
 
 
 def db_create_proxy(identifier: str, api_domain: str) -> dict | None:
@@ -123,10 +157,10 @@ def db_create_proxy(identifier: str, api_domain: str) -> dict | None:
         "ON CONFLICT(identifier) DO UPDATE SET api_domain = excluded.api_domain",
         (identifier, api_domain),
     )
-    # Clear old mocks on re-register
     if old_mocks:
         db.execute("DELETE FROM mocks WHERE proxy_id = ?", (identifier,))
     db.commit()
+    logger.info("[DB] Proxy '%s' -> %s (replaced=%s)", identifier, api_domain, bool(old_mocks))
     return old_mocks or None
 
 
@@ -165,14 +199,12 @@ def db_upsert_mock(
     """Insert or update a mock. Returns the old mock response if it existed."""
     db = _get_db()
 
-    # Check proxy exists
     proxy = db.execute(
         "SELECT 1 FROM proxies WHERE identifier = ?", (proxy_id,)
     ).fetchone()
     if not proxy:
-        return None  # sentinel: proxy not found
+        return None
 
-    # Get old mock
     old_row = db.execute(
         "SELECT response FROM mocks WHERE proxy_id = ? AND endpoint = ? AND method = ?",
         (proxy_id, endpoint, method),
@@ -186,6 +218,7 @@ def db_upsert_mock(
         (proxy_id, endpoint, method, json.dumps(response)),
     )
     db.commit()
+    logger.info("[DB] Mock upserted: %s %s %s", proxy_id, method, endpoint)
     return old_mock
 
 
@@ -204,6 +237,7 @@ def db_delete_mock(proxy_id: str, endpoint: str, method: str) -> dict | None:
         (proxy_id, endpoint, method),
     )
     db.commit()
+    logger.info("[DB] Mock deleted: %s %s %s", proxy_id, method, endpoint)
     return deleted_mock
 
 
@@ -214,6 +248,8 @@ def db_delete_proxy(identifier: str) -> bool:
         "DELETE FROM proxies WHERE identifier = ?", (identifier,)
     )
     db.commit()
+    if cursor.rowcount > 0:
+        logger.info("[DB] Proxy '%s' deleted with all mocks", identifier)
     return cursor.rowcount > 0
 
 
@@ -242,17 +278,195 @@ def db_get_proxy_domain(identifier: str) -> str | None:
     return row["api_domain"] if row else None
 
 
+def db_clone_proxy(source_id: str, target_id: str) -> dict | None:
+    """Clone a proxy and all its mocks. Returns new proxy info or None."""
+    db = _get_db()
+    source = db.execute(
+        "SELECT api_domain FROM proxies WHERE identifier = ?", (source_id,)
+    ).fetchone()
+    if not source:
+        return None
+
+    db.execute(
+        "INSERT INTO proxies (identifier, api_domain) VALUES (?, ?) "
+        "ON CONFLICT(identifier) DO UPDATE SET api_domain = excluded.api_domain",
+        (target_id, source["api_domain"]),
+    )
+    db.execute("DELETE FROM mocks WHERE proxy_id = ?", (target_id,))
+    db.execute(
+        "INSERT INTO mocks (proxy_id, endpoint, method, response) "
+        "SELECT ?, endpoint, method, response FROM mocks WHERE proxy_id = ?",
+        (target_id, source_id),
+    )
+    db.commit()
+
+    mock_count = db.execute(
+        "SELECT COUNT(*) as c FROM mocks WHERE proxy_id = ?", (target_id,)
+    ).fetchone()["c"]
+    logger.info("[DB] Cloned '%s' -> '%s' (%d mocks)", source_id, target_id, mock_count)
+    return {
+        "identifier": target_id,
+        "api_domain": source["api_domain"],
+        "mock_count": mock_count,
+    }
+
+
+# ---------------------------------------------------------------------------
+# DB helper functions — Request History
+# ---------------------------------------------------------------------------
+
+
+def db_log_request(
+    proxy_id: str, endpoint: str, method: str,
+    req_headers: dict | None, req_body: str | None, query_params: str | None,
+    resp_status: int | None, resp_body: str | None,
+    source: str, duration_ms: int | None,
+):
+    """Log a proxy request to the history table."""
+    db = _get_db()
+    db.execute(
+        "INSERT INTO request_history "
+        "(proxy_id, endpoint, method, request_headers, request_body, query_params, "
+        " response_status, response_body, source, duration_ms) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            proxy_id, endpoint, method,
+            json.dumps(req_headers) if req_headers else None,
+            req_body[:2000] if req_body else None,
+            query_params,
+            resp_status,
+            resp_body[:2000] if resp_body else None,
+            source, duration_ms,
+        ),
+    )
+    # Trim old entries
+    db.execute(
+        "DELETE FROM request_history WHERE proxy_id = ? AND id NOT IN "
+        "(SELECT id FROM request_history WHERE proxy_id = ? ORDER BY id DESC LIMIT ?)",
+        (proxy_id, proxy_id, REQUEST_HISTORY_LIMIT),
+    )
+    db.commit()
+
+
+def db_get_request_history(proxy_id: str, limit: int = 50) -> list[dict]:
+    """Get recent request history for a proxy."""
+    db = _get_db()
+    rows = db.execute(
+        "SELECT * FROM request_history WHERE proxy_id = ? ORDER BY id DESC LIMIT ?",
+        (proxy_id, limit),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def db_clear_request_history(proxy_id: str) -> int:
+    """Clear all history for a proxy. Returns count deleted."""
+    db = _get_db()
+    cursor = db.execute(
+        "DELETE FROM request_history WHERE proxy_id = ?", (proxy_id,)
+    )
+    db.commit()
+    return cursor.rowcount
+
+
+# ---------------------------------------------------------------------------
+# DB helper functions — Mock Sequences
+# ---------------------------------------------------------------------------
+
+
+def db_get_and_increment_sequence(proxy_id: str, endpoint: str, method: str) -> int:
+    """Get current call count and increment it. Returns the count BEFORE increment."""
+    db = _get_db()
+    row = db.execute(
+        "SELECT call_count FROM mock_sequences "
+        "WHERE proxy_id = ? AND endpoint = ? AND method = ?",
+        (proxy_id, endpoint, method),
+    ).fetchone()
+
+    if row:
+        count = row["call_count"]
+        db.execute(
+            "UPDATE mock_sequences SET call_count = call_count + 1 "
+            "WHERE proxy_id = ? AND endpoint = ? AND method = ?",
+            (proxy_id, endpoint, method),
+        )
+    else:
+        count = 0
+        db.execute(
+            "INSERT INTO mock_sequences (proxy_id, endpoint, method, call_count) "
+            "VALUES (?, ?, ?, 1)",
+            (proxy_id, endpoint, method),
+        )
+    db.commit()
+    return count
+
+
+def db_reset_sequence(proxy_id: str, endpoint: str | None = None) -> int:
+    """Reset sequence counters. If endpoint is None, reset all for proxy."""
+    db = _get_db()
+    if endpoint:
+        cursor = db.execute(
+            "DELETE FROM mock_sequences WHERE proxy_id = ? AND endpoint = ?",
+            (proxy_id, endpoint),
+        )
+    else:
+        cursor = db.execute(
+            "DELETE FROM mock_sequences WHERE proxy_id = ?", (proxy_id,)
+        )
+    db.commit()
+    return cursor.rowcount
+
+
+# ---------------------------------------------------------------------------
+# Rate Limiting (in-memory, thread-safe)
+# ---------------------------------------------------------------------------
+
+_rate_limits: dict[str, list[float]] = {}
+_rate_lock = threading.Lock()
+
+RATE_LIMIT_WINDOW = int(os.environ.get("PED_RATE_LIMIT_WINDOW", "60"))  # seconds
+RATE_LIMIT_MAX = int(os.environ.get("PED_RATE_LIMIT_MAX", "0"))  # 0 = disabled
+
+
+def check_rate_limit(identifier: str) -> bool:
+    """Returns True if the request is allowed, False if rate limited."""
+    if RATE_LIMIT_MAX <= 0:
+        return True
+
+    now = time.time()
+    cutoff = now - RATE_LIMIT_WINDOW
+
+    with _rate_lock:
+        timestamps = _rate_limits.get(identifier, [])
+        timestamps = [t for t in timestamps if t > cutoff]
+
+        if len(timestamps) >= RATE_LIMIT_MAX:
+            _rate_limits[identifier] = timestamps
+            return False
+
+        timestamps.append(now)
+        _rate_limits[identifier] = timestamps
+        return True
+
+
+def get_rate_limit_info(identifier: str) -> dict:
+    """Return current rate limit status for an identifier."""
+    now = time.time()
+    cutoff = now - RATE_LIMIT_WINDOW
+    with _rate_lock:
+        timestamps = _rate_limits.get(identifier, [])
+        timestamps = [t for t in timestamps if t > cutoff]
+    return {
+        "identifier": identifier,
+        "window_seconds": RATE_LIMIT_WINDOW,
+        "max_requests": RATE_LIMIT_MAX if RATE_LIMIT_MAX > 0 else "unlimited",
+        "current_count": len(timestamps),
+        "remaining": max(0, RATE_LIMIT_MAX - len(timestamps)) if RATE_LIMIT_MAX > 0 else "unlimited",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def try_or(fn, default=None):
-    """One-liner try/except.  Usage: try_or(lambda: obj.attr, None)"""
-    try:
-        return fn()
-    except Exception:
-        return default
 
 
 def log_access(f):
@@ -407,7 +621,6 @@ def extract_path_param(prefix: str, url: str | None) -> str | None:
 
 
 def path_to_regex(path_pattern: str) -> re.Pattern:
-    # Temporarily replace <param> placeholders, escape the rest, then restore
     placeholder = "\x00PARAM\x00"
     temp = re.sub(r"<\w+>", placeholder, path_pattern)
     temp = re.escape(temp)
@@ -426,20 +639,16 @@ def match_path(mock_endpoints: dict, actual_path: str) -> str | None:
 # API class — multi-content-type forwarding with curl logging
 # ---------------------------------------------------------------------------
 
-FORWARD_TIMEOUT = int(os.environ.get("PED_FORWARD_TIMEOUT", "30"))
-
 
 class API:
     """Captures a Flask request and forwards it to a target URL,
     handling JSON, form-encoded, multipart, and raw body types.
     Logs the equivalent curl command for debugging."""
 
-    # Headers to strip from the incoming request before forwarding
     _HOP_BY_HOP = frozenset({
         'host', 'content-length', 'transfer-encoding',
         'connection', 'keep-alive', 'upgrade',
     })
-    # Headers to exclude from the upstream response when building our response
     _RESPONSE_HOP = frozenset({
         'content-encoding', 'content-length', 'transfer-encoding',
         'connection', 'keep-alive',
@@ -452,7 +661,6 @@ class API:
             k: v for k, v in flask_request.headers.items()
             if k.lower() not in self._HOP_BY_HOP
         }
-        # Ensure Accept */* like Postman if not explicitly set
         if 'Accept' not in self.headers:
             self.headers['Accept'] = '*/*'
         self.params = flask_request.args.to_dict(flat=False)
@@ -516,16 +724,21 @@ class API:
         logger.info("[CURL] %s", self._to_curl())
         if self.body and 'json' in self.body:
             logger.debug("[FORWARD] Request body: %s", json.dumps(self.body['json'])[:500])
+
+        start = time.time()
         response = http_requests.request(self.method, self.url, **kwargs)
-        logger.info("[FORWARD] %s %s -> %s (%s bytes) response-type=%s",
+        duration_ms = int((time.time() - start) * 1000)
+
+        logger.info("[FORWARD] %s %s -> %s (%s bytes, %dms) response-type=%s",
                      self.method, self.url, response.status_code,
-                     len(response.content), response.headers.get('Content-Type', 'unknown'))
+                     len(response.content), duration_ms,
+                     response.headers.get('Content-Type', 'unknown'))
         if response.status_code >= 400:
             logger.warning("[FORWARD] Upstream error %s: %s", response.status_code, response.text[:300])
-        return self._build_response(response)
+
+        return self._build_response(response), duration_ms, response
 
     def _build_response(self, response):
-        # Collect passthrough headers from upstream (skip hop-by-hop)
         pass_headers = {
             k: v for k, v in response.headers.items()
             if k.lower() not in self._RESPONSE_HOP
@@ -551,7 +764,7 @@ class API:
             content_type=content_type,
         )
         for k, v in pass_headers.items():
-            if k.lower() != 'content-type':  # already set above
+            if k.lower() != 'content-type':
                 resp.headers[k] = v
         return resp
 
@@ -562,9 +775,7 @@ class API:
 
 
 class MockMatcher:
-    """Finds matching mock responses by trying multiple endpoint variants
-    (with/without leading slash, with/without query string, full URL)
-    and pattern matching for <param> placeholders."""
+    """Finds matching mock responses by trying multiple endpoint variants."""
 
     def __init__(self, mock_requests, endpoint, query_string, api_url):
         self.mock_requests = mock_requests
@@ -590,14 +801,12 @@ class MockMatcher:
 
     def find(self, method):
         """Return (mock_key, mock_data) or (None, None)."""
-        # Exact match first
         for variant in self.variants:
             mock_methods = self.mock_requests.get(variant)
             if mock_methods and mock_methods.get(method):
                 logger.info("[MOCK HIT] %s matched exact key '%s'", method, variant)
                 return variant, mock_methods[method]
 
-        # Pattern match (keys with <param> placeholders)
         for mock_key, mock_methods in self.mock_requests.items():
             if '<' not in mock_key:
                 continue
@@ -624,7 +833,6 @@ _SAFE_GENERATORS = {
 
 
 def _safe_alnum(arg: str) -> str:
-    """Generate alphanumeric string from pairs like '[2,3,4,1]' or '2,3,4,1'."""
     arg = arg.strip()
     if arg.startswith("[") and arg.endswith("]"):
         try:
@@ -648,59 +856,34 @@ def _safe_alnum(arg: str) -> str:
 # ---------------------------------------------------------------------------
 
 _SNIPPET_FUNCTIONS = {
-    "abs": abs,
-    "int": int,
-    "float": float,
-    "str": str,
-    "len": len,
-    "min": min,
-    "max": max,
-    "round": round,
-    "sum": sum,
-    "sorted": sorted,
-    "list": list,
-    "dict": dict,
-    "tuple": tuple,
-    "bool": bool,
-    "enumerate": enumerate,
-    "zip": zip,
-    "range": range,
-    "map": map,
-    "filter": filter,
-    "any": any,
-    "all": all,
-    "isinstance": isinstance,
-    "type": type,
+    "abs": abs, "int": int, "float": float, "str": str, "len": len,
+    "min": min, "max": max, "round": round, "sum": sum, "sorted": sorted,
+    "list": list, "dict": dict, "tuple": tuple, "bool": bool,
+    "enumerate": enumerate, "zip": zip, "range": range,
+    "map": map, "filter": filter, "any": any, "all": all,
+    "isinstance": isinstance, "type": type,
 }
 
 _SNIPPET_MAX_LENGTH = 2000
 
 
 def safe_eval_snippet(snippet: str) -> str:
-    """Evaluate a Python expression in a sandboxed environment."""
     snippet = snippet.strip()
     if not snippet:
         return ""
     if len(snippet) > _SNIPPET_MAX_LENGTH:
-        raise ValueError(
-            f"snippet() expression too long ({len(snippet)} chars, max {_SNIPPET_MAX_LENGTH})"
-        )
+        raise ValueError(f"snippet() expression too long ({len(snippet)} chars)")
 
-    evaluator = EvalWithCompoundTypes(
-        functions=_SNIPPET_FUNCTIONS,
-        names={},
-    )
-
+    evaluator = EvalWithCompoundTypes(functions=_SNIPPET_FUNCTIONS, names={})
     try:
         result = evaluator.eval(snippet)
         return result if isinstance(result, str) else str(result)
     except Exception as exc:
-        logger.warning("snippet() evaluation failed: %s — expression: %s", exc, snippet[:200])
+        logger.warning("snippet() failed: %s — expr: %s", exc, snippet[:200])
         raise ValueError(f"snippet() evaluation error: {exc}") from exc
 
 
 def _resolve_value(value: str, header: dict, json_data: dict, params: dict, url: str | None) -> str | None:
-    """Resolve a single template-style string value from mock data."""
     if value.startswith("headerget(") and value.endswith(")"):
         return header.get(value[10:-1], value)
     if value.startswith("jsonget(") and value.endswith(")"):
@@ -740,8 +923,44 @@ def resolve_mock_data(data, header=None, json_body=None, params=None, url=None):
                     process(item)
         return node
 
-    logger.debug("resolve_mock_data called: url=%s", url)
     return process(data)
+
+
+# ---------------------------------------------------------------------------
+# Mock conditionals
+# ---------------------------------------------------------------------------
+
+
+def _check_conditions(conditions: list[dict], headers: dict, json_body: dict, params: dict) -> bool:
+    """Check if all conditions match. Each condition has field, source, operator, value."""
+    for cond in conditions:
+        source_type = cond.get("source", "json")  # json, header, param
+        field = cond.get("field", "")
+        operator = cond.get("operator", "eq")
+        expected = cond.get("value")
+
+        if source_type == "header":
+            actual = headers.get(field)
+        elif source_type == "param":
+            actual = params.get(field)
+        else:
+            actual = json_body.get(field)
+
+        if operator == "eq" and str(actual) != str(expected):
+            return False
+        elif operator == "neq" and str(actual) == str(expected):
+            return False
+        elif operator == "contains" and (actual is None or str(expected) not in str(actual)):
+            return False
+        elif operator == "exists" and actual is None:
+            return False
+        elif operator == "not_exists" and actual is not None:
+            return False
+        elif operator == "gt" and (actual is None or float(actual) <= float(expected)):
+            return False
+        elif operator == "lt" and (actual is None or float(actual) >= float(expected)):
+            return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -763,6 +982,31 @@ def _resolve_iv(value: str) -> str:
             raise ValueError("Default IV not configured (set PED_DEFAULT_ENC_IV)")
         return DEFAULT_ENC_IV
     return value
+
+
+# ---------------------------------------------------------------------------
+# Routes — Health Check
+# ---------------------------------------------------------------------------
+
+
+@app.route("/health")
+def health_check():
+    """Health check endpoint for monitoring."""
+    try:
+        db = _get_db()
+        db.execute("SELECT 1").fetchone()
+        db_ok = True
+    except Exception:
+        db_ok = False
+
+    status = "healthy" if db_ok else "degraded"
+    code = 200 if db_ok else 503
+    return jsonify({
+        "status": status,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "database": "ok" if db_ok else "error",
+        "version": "2.0.0",
+    }), code
 
 
 # ---------------------------------------------------------------------------
@@ -799,7 +1043,10 @@ def encrypt_endpoint():
     if not normal_data:
         return jsonify({"error": "data key is missing"}), 400
 
-    encrypted = EncryptHelper.encrypt(secret, enc_iv, normal_data)
+    try:
+        encrypted = EncryptHelper.encrypt(secret, enc_iv, normal_data)
+    except Exception as e:
+        return jsonify({"error": f"Encryption failed: {e}"}), 400
     return jsonify({"encrypted": json.dumps(encrypted)})
 
 
@@ -827,9 +1074,15 @@ def decrypt_endpoint():
         return jsonify({"error": "encryptedData key is missing"}), 400
 
     if isinstance(encrypted_data, str):
-        encrypted_data = json.loads(encrypted_data)
+        try:
+            encrypted_data = json.loads(encrypted_data)
+        except json.JSONDecodeError:
+            return jsonify({"error": "encryptedData is not valid JSON"}), 400
 
-    decrypted = EncryptHelper.decrypt(secret, enc_iv, encrypted_data)
+    try:
+        decrypted = EncryptHelper.decrypt(secret, enc_iv, encrypted_data)
+    except Exception as e:
+        return jsonify({"error": f"Decryption failed: {e}"}), 400
     return jsonify({"decrypted": json.dumps(decrypted, indent=4)})
 
 
@@ -879,13 +1132,11 @@ def create_proxy():
     identifier = request_data.get("identifier") or shortuuid.uuid()
     old_mocks = db_create_proxy(identifier, api_domain)
 
-    return jsonify(
-        {
-            "identifier": identifier,
-            "message": "api mocker created successfully",
-            "old_mocks": old_mocks,
-        }
-    )
+    return jsonify({
+        "identifier": identifier,
+        "message": "api mocker created successfully",
+        "old_mocks": old_mocks,
+    })
 
 
 @app.route("/proxy/mock/create/", methods=["POST"])
@@ -910,15 +1161,13 @@ def create_mock_proxy():
     if old_mock is None and not db_get_proxy(proxy_identifier):
         return jsonify({"error": f"Proxy server not found for {proxy_identifier}"}), 404
 
-    return jsonify(
-        {
-            "proxy_identifier": proxy_identifier,
-            "end_point": end_point,
-            "method": method,
-            "new_mock": new_mock,
-            "old_mock": old_mock,
-        }
-    )
+    return jsonify({
+        "proxy_identifier": proxy_identifier,
+        "end_point": end_point,
+        "method": method,
+        "new_mock": new_mock,
+        "old_mock": old_mock,
+    })
 
 
 @app.route("/proxy/mock/delete/", methods=["POST"])
@@ -939,13 +1188,11 @@ def delete_mock():
     if deleted_mock is None:
         return jsonify({"error": "Mock not found"}), 404
 
-    logger.info("[MOCK DELETE] %s %s %s", proxy_id, method, endpoint)
-
     return jsonify({
         "proxy_identifier": proxy_id,
         "end_point": endpoint,
         "method": method,
-        "deleted_mock": deleted_mock
+        "deleted_mock": deleted_mock,
     })
 
 
@@ -974,16 +1221,200 @@ def get_proxy(identifier):
     proxy = db_get_proxy(identifier)
     if not proxy:
         return jsonify({}), 200
-    return jsonify(
-        {
-            "api_domain": proxy["api_domain"],
-            "mocked_requests": proxy["mocked_requests"],
-        }
-    ), 200
+    return jsonify({
+        "api_domain": proxy["api_domain"],
+        "mocked_requests": proxy["mocked_requests"],
+    }), 200
 
 
 # ---------------------------------------------------------------------------
-# Routes — Proxy passthrough
+# Routes — Proxy Clone
+# ---------------------------------------------------------------------------
+
+
+@app.route("/proxy/clone/", methods=["POST"])
+@log_access
+@require_auth
+def clone_proxy():
+    """Clone a proxy and all its mocks to a new identifier."""
+    request_data = request.json
+    if not request_data:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    source_id = request_data.get("source_identifier")
+    target_id = request_data.get("target_identifier") or shortuuid.uuid()
+
+    if not source_id:
+        return jsonify({"error": "source_identifier is required"}), 400
+
+    result = db_clone_proxy(source_id, target_id)
+    if result is None:
+        return jsonify({"error": f"Source proxy '{source_id}' not found"}), 404
+
+    return jsonify({
+        "message": f"Proxy '{source_id}' cloned to '{target_id}'",
+        **result,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Routes — Import / Export
+# ---------------------------------------------------------------------------
+
+
+@app.route("/proxy/export/<identifier>/", methods=["GET"])
+@log_access
+@require_auth
+def export_proxy(identifier):
+    """Export a proxy and all its mocks as JSON."""
+    proxy = db_get_proxy(identifier)
+    if not proxy:
+        return jsonify({"error": "Proxy not found"}), 404
+
+    export_data = {
+        "identifier": identifier,
+        "api_domain": proxy["api_domain"],
+        "mocked_requests": proxy["mocked_requests"],
+        "exported_at": datetime.utcnow().isoformat() + "Z",
+    }
+    return jsonify(export_data)
+
+
+@app.route("/proxy/export/all/", methods=["GET"])
+@log_access
+@require_auth
+def export_all_proxies():
+    """Export all proxies and their mocks."""
+    proxies = db_list_proxies()
+    result = {}
+    for p in proxies:
+        proxy = db_get_proxy(p["identifier"])
+        if proxy:
+            result[p["identifier"]] = {
+                "api_domain": proxy["api_domain"],
+                "mocked_requests": proxy["mocked_requests"],
+            }
+    return jsonify({
+        "proxies": result,
+        "count": len(result),
+        "exported_at": datetime.utcnow().isoformat() + "Z",
+    })
+
+
+@app.route("/proxy/import/", methods=["POST"])
+@log_access
+@require_auth
+def import_proxies():
+    """Import proxies and mocks from JSON. Accepts single or bulk format."""
+    request_data = request.json
+    if not request_data:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    imported = []
+    errors = []
+
+    # Single proxy format: {identifier, api_domain, mocked_requests}
+    if "identifier" in request_data:
+        items = {request_data["identifier"]: request_data}
+    # Bulk format: {proxies: {id: {api_domain, mocked_requests}, ...}}
+    elif "proxies" in request_data:
+        items = request_data["proxies"]
+    else:
+        return jsonify({"error": "Expected 'identifier' or 'proxies' key"}), 400
+
+    for identifier, data in items.items():
+        try:
+            api_domain = data.get("api_domain", "")
+            if not _is_domain_allowed(api_domain):
+                errors.append({"identifier": identifier, "error": "Domain not allowed"})
+                continue
+
+            db_create_proxy(identifier, api_domain)
+            mock_count = 0
+            for endpoint, methods in data.get("mocked_requests", {}).items():
+                for method, response in methods.items():
+                    db_upsert_mock(identifier, endpoint, method, response)
+                    mock_count += 1
+
+            imported.append({"identifier": identifier, "mock_count": mock_count})
+        except Exception as e:
+            errors.append({"identifier": identifier, "error": str(e)})
+
+    return jsonify({
+        "imported": imported,
+        "errors": errors,
+        "total_imported": len(imported),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Routes — Request History
+# ---------------------------------------------------------------------------
+
+
+@app.route("/proxy/history/<identifier>/", methods=["GET"])
+@log_access
+@require_auth
+def get_history(identifier):
+    """Get recent request history for a proxy."""
+    limit = request.args.get("limit", 50, type=int)
+    history = db_get_request_history(identifier, limit)
+    # Parse JSON strings back to objects for readability
+    for h in history:
+        for field in ("request_headers", "request_body", "response_body"):
+            if h.get(field):
+                try:
+                    h[field] = json.loads(h[field])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+    return jsonify({"proxy_id": identifier, "count": len(history), "history": history})
+
+
+@app.route("/proxy/history/<identifier>/clear/", methods=["POST"])
+@log_access
+@require_auth
+def clear_history(identifier):
+    """Clear request history for a proxy."""
+    count = db_clear_request_history(identifier)
+    return jsonify({"message": f"Cleared {count} history entries for '{identifier}'"})
+
+
+# ---------------------------------------------------------------------------
+# Routes — Mock Sequences
+# ---------------------------------------------------------------------------
+
+
+@app.route("/proxy/sequence/reset/", methods=["POST"])
+@log_access
+@require_auth
+def reset_sequence():
+    """Reset mock sequence counters."""
+    request_data = request.json
+    if not request_data:
+        return jsonify({"error": "Request body must be JSON"}), 400
+    proxy_id = request_data.get("proxy_identifier")
+    endpoint = request_data.get("end_point")  # optional
+    if not proxy_id:
+        return jsonify({"error": "proxy_identifier is required"}), 400
+    count = db_reset_sequence(proxy_id, endpoint)
+    return jsonify({"message": f"Reset {count} sequence counters"})
+
+
+# ---------------------------------------------------------------------------
+# Routes — Rate Limit Info
+# ---------------------------------------------------------------------------
+
+
+@app.route("/proxy/ratelimit/<identifier>/", methods=["GET"])
+@log_access
+@require_auth
+def rate_limit_info(identifier):
+    """Get current rate limit status for a proxy."""
+    return jsonify(get_rate_limit_info(identifier))
+
+
+# ---------------------------------------------------------------------------
+# Routes — Proxy Passthrough
 # ---------------------------------------------------------------------------
 
 
@@ -994,7 +1425,17 @@ def get_proxy(identifier):
 @log_access
 @require_auth
 def proxy_request(identifier, endpoint):
+    start_time = time.time()
+
     try:
+        # --- Rate limiting ---
+        if not check_rate_limit(identifier):
+            logger.warning("[RATE LIMIT] %s exceeded rate limit", identifier)
+            return jsonify({
+                "error": "Rate limit exceeded",
+                **get_rate_limit_info(identifier),
+            }), 429
+
         api_domain = db_get_proxy_domain(identifier)
         if api_domain is None:
             return jsonify({"error": f"Proxy '{identifier}' not found"}), 404
@@ -1006,7 +1447,11 @@ def proxy_request(identifier, endpoint):
         logger.info("[PROXY] %s /%s/%s%s", method, identifier, endpoint,
                      '?' + query_string if query_string else '')
 
-        # --- Redirect mode (server-side forward, preserves headers/body) ---
+        # Capture request info for history
+        req_headers = {k: v for k, v in request.headers.items() if k.lower() != 'host'}
+        req_body = request.get_data(as_text=True)[:2000] or None
+
+        # --- Redirect mode ---
         if identifier.endswith("_REDIRECT"):
             if not _is_domain_allowed(api_domain):
                 return jsonify({"error": "Redirect target domain not allowed"}), 403
@@ -1015,34 +1460,89 @@ def proxy_request(identifier, endpoint):
                 target_url += f"?{request.query_string.decode()}"
             try:
                 fwd_api = API(request, target_url)
-                return fwd_api.forward()
+                flask_resp, duration_ms, raw_resp = fwd_api.forward()
+                db_log_request(
+                    identifier, endpoint, method, req_headers, req_body, query_string,
+                    raw_resp.status_code, raw_resp.text[:2000], "redirect", duration_ms,
+                )
+                return flask_resp
             except http_requests.exceptions.RequestException as exc:
                 logger.error("Redirect forward failed: %s", exc)
                 return jsonify({"error": "Redirect forward failed"}), 502
 
-        # --- Mock lookup using MockMatcher ---
+        # --- Mock lookup ---
         mock_requests = db_get_mocks_for_proxy(identifier)
         matcher = MockMatcher(mock_requests, endpoint, query_string, api_url)
         _, mock_data = matcher.find(method)
 
         if mock_data:
-            headers = {k: v for k, v in request.headers.items() if k.lower() != 'host'}
+            headers = req_headers
             json_body = request.get_json(silent=True) or {}
             params = request.args.to_dict()
 
             mock_data_copy = copy.deepcopy(mock_data)
 
-            # Support status_code + body mock structure
+            # --- Mock sequencing ---
+            # If mock is a list, pick response based on call count
+            if isinstance(mock_data_copy, list):
+                call_count = db_get_and_increment_sequence(identifier, endpoint, method)
+                idx = call_count % len(mock_data_copy)
+                logger.info("[SEQUENCE] %s %s call #%d -> index %d/%d",
+                            method, endpoint, call_count + 1, idx, len(mock_data_copy))
+                mock_data_copy = mock_data_copy[idx]
+
+            # --- Conditional mocks ---
+            # If mock has "conditions" + "responses", pick first matching
+            if isinstance(mock_data_copy, dict) and "conditions" in mock_data_copy and "responses" in mock_data_copy:
+                selected = None
+                for case in mock_data_copy["responses"]:
+                    case_conditions = case.get("when", [])
+                    if _check_conditions(case_conditions, headers, json_body, params):
+                        selected = case.get("then", {})
+                        logger.info("[CONDITIONAL] Matched condition: %s", case_conditions)
+                        break
+                if selected is None:
+                    selected = mock_data_copy.get("default", {"error": "No condition matched"})
+                    logger.info("[CONDITIONAL] No condition matched, using default")
+                mock_data_copy = selected
+
+            # --- Response delay ---
+            delay_ms = 0
+            if isinstance(mock_data_copy, dict):
+                delay_ms = mock_data_copy.pop("_delay_ms", 0)
+            if delay_ms > 0:
+                logger.info("[DELAY] Sleeping %dms before responding", delay_ms)
+                time.sleep(delay_ms / 1000.0)
+
+            # --- status_code + body structure ---
             if isinstance(mock_data_copy, dict) and "status_code" in mock_data_copy and "body" in mock_data_copy:
                 status_code = mock_data_copy["status_code"]
+                # Response headers from mock
+                resp_headers = mock_data_copy.get("headers", {})
                 body = mock_data_copy["body"]
                 processed = resolve_mock_data(
                     body, header=headers, json_body=json_body, params=params, url=api_url
                 )
-                return jsonify(processed), status_code
+                duration_ms = int((time.time() - start_time) * 1000)
+                db_log_request(
+                    identifier, endpoint, method, req_headers, req_body, query_string,
+                    status_code, json.dumps(processed)[:2000], "mock", duration_ms,
+                )
+                response = jsonify(processed), status_code
+                # Apply custom response headers
+                if resp_headers:
+                    resp_obj = response[0] if isinstance(response, tuple) else response
+                    for k, v in resp_headers.items():
+                        resp_obj.headers[k] = v
+                return response
 
             processed = resolve_mock_data(
                 mock_data_copy, header=headers, json_body=json_body, params=params, url=api_url
+            )
+            duration_ms = int((time.time() - start_time) * 1000)
+            db_log_request(
+                identifier, endpoint, method, req_headers, req_body, query_string,
+                200, json.dumps(processed)[:2000], "mock", duration_ms,
             )
             return jsonify(processed), 200
 
@@ -1050,15 +1550,20 @@ def proxy_request(identifier, endpoint):
         if not _is_domain_allowed(api_domain):
             return jsonify({"error": "Target domain not allowed"}), 403
 
-        # --- Forward to real API using API class ---
+        # --- Forward to real API ---
         try:
             api = API(request, api_url)
-            return api.forward()
+            flask_resp, duration_ms, raw_resp = api.forward()
+            db_log_request(
+                identifier, endpoint, method, req_headers, req_body, query_string,
+                raw_resp.status_code, raw_resp.text[:2000], "forward", duration_ms,
+            )
+            return flask_resp
         except http_requests.exceptions.Timeout:
             logger.error("[PROXY] Timeout forwarding %s %s", method, api_url)
             return jsonify({"error": f"Upstream timeout after {FORWARD_TIMEOUT}s"}), 504
         except http_requests.exceptions.ConnectionError as exc:
-            logger.error("[PROXY] Connection error forwarding %s %s: %s", method, api_url, exc)
+            logger.error("[PROXY] Connection error %s %s: %s", method, api_url, exc)
             return jsonify({"error": "Upstream connection failed"}), 502
         except http_requests.exceptions.RequestException as exc:
             logger.error("[PROXY] Request failed: %s", exc)
@@ -1091,8 +1596,13 @@ def proxy_server_page():
 # ---------------------------------------------------------------------------
 
 
+from werkzeug.exceptions import HTTPException
+
+
 @app.errorhandler(Exception)
 def handle_exception(exc):
+    if isinstance(exc, HTTPException):
+        return exc
     logger.exception("Unhandled exception: %s", exc)
     return jsonify({"error": "An unexpected error occurred"}), 500
 
@@ -1103,7 +1613,6 @@ def handle_exception(exc):
 
 
 def migrate_from_json(json_path: str):
-    """Import existing proxy_server.json data into SQLite."""
     if not os.path.exists(json_path):
         return
     try:
@@ -1133,7 +1642,6 @@ def migrate_from_json(json_path: str):
         conn.commit()
         conn.close()
 
-        # Rename old file so migration doesn't run again
         backup = json_path + ".migrated"
         os.rename(json_path, backup)
         logger.info(
@@ -1148,10 +1656,7 @@ def migrate_from_json(json_path: str):
 # Entry point
 # ---------------------------------------------------------------------------
 
-# Initialize DB on import (safe to call multiple times)
 init_db()
-
-# Auto-migrate old JSON data if present
 migrate_from_json(os.path.join(_BASE_DIR, "proxy_server.json"))
 
 if __name__ == "__main__":
