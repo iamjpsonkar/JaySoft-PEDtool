@@ -1,0 +1,45 @@
+/* === login.html specific styles === */
+
+/* Override body for centered layout */
+html, body { height: 100%; }
+body {
+    display: flex; align-items: center; justify-content: center;
+}
+
+/* --- Login card --- */
+.login-card {
+    background: var(--white); border-radius: var(--radius);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.1); padding: 40px;
+    width: 100%; max-width: 400px; text-align: center;
+}
+.login-card h1 {
+    margin: 0 0 8px; font-size: 1.5rem; color: var(--blue);
+}
+.login-card p {
+    margin: 0 0 24px; font-size: 0.9rem; color: var(--gray-text);
+}
+
+/* --- Field overrides for login --- */
+.field { margin-bottom: 16px; text-align: left; }
+.field label {
+    margin-bottom: 6px;
+}
+.field input {
+    padding: 10px 14px; font-size: 0.95rem;
+}
+
+/* --- Button override for login (full width) --- */
+.btn {
+    width: 100%; padding: 11px; font-size: 0.95rem;
+}
+.btn:hover { background: var(--blue-dark); }
+
+/* --- Error message --- */
+.error {
+    background: #fde8e8; color: var(--red); padding: 10px 14px;
+    border-radius: 6px; font-size: 0.85rem; margin-bottom: 16px;
+    border: 1px solid #f5c6cb;
+}
+
+/* --- Lock icon --- */
+.lock-icon { font-size: 2.5rem; margin-bottom: 12px; }

@@ -1,0 +1,77 @@
+/* === index.html specific styles === */
+
+/* Override body for full-height layout */
+html, body { height: 100%; }
+body { display: flex; flex-direction: column; }
+
+/* Override topbar padding for index */
+.topbar { padding: 10px 24px; flex-shrink: 0; }
+.topbar h1 { font-size: 1.2rem; }
+.topbar a { font-size: 0.85rem; }
+
+/* --- Toolbar --- */
+.toolbar {
+    background: var(--white); border-bottom: 1px solid var(--gray-border);
+    padding: 10px 24px; display: flex; align-items: center; gap: 12px;
+    flex-wrap: wrap; flex-shrink: 0;
+}
+.toolbar-group {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px; border: 1px solid var(--gray-border);
+    border-radius: var(--radius); background: #fafafa;
+}
+.toolbar label { font-size: 0.82rem; font-weight: 600; margin: 0; white-space: nowrap; }
+.toolbar input[type="text"] {
+    padding: 5px 10px; border: 1px solid var(--gray-border); border-radius: 5px;
+    font-size: 0.85rem; width: 140px; font-family: var(--mono);
+}
+.toolbar input[type="text"]:focus { outline: none; border-color: var(--blue); }
+.toolbar input[type="checkbox"] { margin: 0; cursor: pointer; width: 16px; height: 16px; accent-color: var(--blue); }
+
+/* Override btn for index (slightly smaller) */
+.toolbar .btn {
+    padding: 6px 16px; font-size: 0.85rem;
+}
+
+/* --- Editor area --- */
+.editors {
+    flex: 1; display: flex; overflow: hidden; min-height: 0;
+}
+.editor-pane {
+    flex: 1; display: flex; flex-direction: column; overflow: hidden;
+    border-right: 1px solid var(--gray-border);
+}
+.editor-pane:last-child { border-right: none; }
+.pane-header {
+    padding: 8px 16px; background: #f8f9fa; border-bottom: 1px solid var(--gray-border);
+    font-size: 0.8rem; font-weight: 600; color: var(--gray-text);
+    display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+}
+.pane-header .pane-actions { display: flex; gap: 6px; }
+.pane-header .btn-sm {
+    padding: 3px 10px; font-size: 0.75rem; border-radius: 4px;
+    cursor: pointer; border: 1px solid var(--gray-border);
+    background: var(--white); color: var(--gray-text); transition: all 0.2s;
+}
+.pane-header .btn-sm:hover { background: var(--blue-light); color: var(--blue); border-color: var(--blue); }
+textarea.editor {
+    flex: 1; width: 100%; border: none; padding: 16px; resize: none;
+    font-family: var(--mono); font-size: 0.85rem; line-height: 1.6;
+    background: var(--white); color: #333; outline: none;
+}
+textarea.editor::placeholder { color: #aaa; }
+
+/* --- Status bar --- */
+.statusbar {
+    background: #f8f9fa; border-top: 1px solid var(--gray-border);
+    padding: 4px 24px; font-size: 0.75rem; color: var(--gray-text);
+    display: flex; gap: 20px; flex-shrink: 0;
+}
+
+/* --- Responsive --- */
+@media (max-width: 700px) {
+    .editors { flex-direction: column; }
+    .editor-pane { border-right: none; border-bottom: 1px solid var(--gray-border); }
+    .toolbar { gap: 8px; }
+    .toolbar input[type="text"] { width: 100px; }
+}

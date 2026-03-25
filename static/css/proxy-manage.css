@@ -1,0 +1,71 @@
+/* === proxy_manage.html specific styles === */
+
+/* --- Status bar --- */
+.status-bar {
+    background: var(--white); border-bottom: 1px solid var(--gray-border);
+    padding: 6px 24px; display: flex; align-items: center; gap: 16px;
+    font-size: 0.8rem; color: var(--gray-text); flex-wrap: wrap;
+}
+.status-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    margin-right: 4px; vertical-align: middle;
+}
+.status-dot.ok { background: var(--green); }
+.status-dot.err { background: var(--red); }
+.status-dot.loading { background: var(--orange); }
+.rate-limit-info { margin-left: auto; }
+
+/* --- Layout --- */
+.page { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+/* --- History expandable row --- */
+.history-detail {
+    display: none; background: #f8f9fa; padding: 12px;
+    border-bottom: 1px solid #eee;
+}
+.history-detail.visible { display: table-row; }
+.history-detail td { padding: 12px; }
+.history-detail pre {
+    background: #1e1e2e; color: #cdd6f4; padding: 10px; border-radius: 6px;
+    font-family: var(--mono); font-size: 0.78rem; white-space: pre-wrap;
+    word-break: break-word; margin: 4px 0 0; max-height: 200px; overflow-y: auto;
+}
+.history-detail-label {
+    font-weight: 600; font-size: 0.8rem; color: var(--blue-dark); margin-top: 8px;
+}
+.history-detail-label:first-child { margin-top: 0; }
+
+/* --- Source badge --- */
+.source-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 0.72rem; font-weight: 700; color: var(--white);
+}
+.source-mock { background: #6f42c1; }
+.source-forward { background: var(--blue); }
+.source-redirect { background: var(--orange); }
+.source-error { background: var(--red); }
+
+/* --- Section collapse --- */
+.section-header {
+    display: flex; align-items: center; gap: 10px; cursor: pointer;
+    user-select: none;
+}
+.section-header h2 { margin: 0; }
+.section-chevron {
+    transition: transform 0.2s; font-size: 0.8rem; color: var(--gray-text);
+}
+.section-chevron.collapsed { transform: rotate(-90deg); }
+.section-body.collapsed { display: none; }
+
+/* --- Inline form row --- */
+.inline-form { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.inline-form .field { margin-bottom: 0; }
+
+/* --- Action bar --- */
+.action-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.hidden-section { display: none; margin-bottom: 16px; padding: 14px; background: #f8f9fa; border-radius: 6px; border: 1px solid var(--gray-border); }
+.hidden-section.visible { display: block; }
+
+/* --- Clickable rows --- */
+.clickable-row { cursor: pointer; }
+.clickable-row:hover td { background: var(--blue-light) !important; }
