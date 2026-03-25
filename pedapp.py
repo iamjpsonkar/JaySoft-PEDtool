@@ -434,13 +434,27 @@ class API:
     handling JSON, form-encoded, multipart, and raw body types.
     Logs the equivalent curl command for debugging."""
 
+    # Headers to strip from the incoming request before forwarding
+    _HOP_BY_HOP = frozenset({
+        'host', 'content-length', 'transfer-encoding',
+        'connection', 'keep-alive', 'upgrade',
+    })
+    # Headers to exclude from the upstream response when building our response
+    _RESPONSE_HOP = frozenset({
+        'content-encoding', 'content-length', 'transfer-encoding',
+        'connection', 'keep-alive',
+    })
+
     def __init__(self, flask_request, api_url):
         self.method = flask_request.method
         self.url = api_url
         self.headers = {
             k: v for k, v in flask_request.headers.items()
-            if k.lower() not in ('host', 'content-length', 'transfer-encoding')
+            if k.lower() not in self._HOP_BY_HOP
         }
+        # Ensure Accept */* like Postman if not explicitly set
+        if 'Accept' not in self.headers:
+            self.headers['Accept'] = '*/*'
         self.params = flask_request.args.to_dict(flat=False)
         self.params = {
             k: v[0] if len(v) == 1 else v
@@ -500,13 +514,28 @@ class API:
 
         logger.info("[FORWARD] %s %s content-type=%s", self.method, self.url, self.content_type)
         logger.info("[CURL] %s", self._to_curl())
+        if self.body and 'json' in self.body:
+            logger.debug("[FORWARD] Request body: %s", json.dumps(self.body['json'])[:500])
         response = http_requests.request(self.method, self.url, **kwargs)
-        logger.info("[FORWARD] %s %s -> %s (%s bytes)", self.method, self.url, response.status_code, len(response.content))
+        logger.info("[FORWARD] %s %s -> %s (%s bytes) response-type=%s",
+                     self.method, self.url, response.status_code,
+                     len(response.content), response.headers.get('Content-Type', 'unknown'))
+        if response.status_code >= 400:
+            logger.warning("[FORWARD] Upstream error %s: %s", response.status_code, response.text[:300])
         return self._build_response(response)
 
     def _build_response(self, response):
+        # Collect passthrough headers from upstream (skip hop-by-hop)
+        pass_headers = {
+            k: v for k, v in response.headers.items()
+            if k.lower() not in self._RESPONSE_HOP
+        }
+
         if not response.content:
-            return Response(status=response.status_code)
+            resp = Response(status=response.status_code)
+            for k, v in pass_headers.items():
+                resp.headers[k] = v
+            return resp
 
         content_type = response.headers.get('Content-Type', 'text/plain')
 
@@ -516,11 +545,15 @@ class API:
             except ValueError:
                 pass
 
-        return Response(
+        resp = Response(
             response.content,
             status=response.status_code,
             content_type=content_type,
         )
+        for k, v in pass_headers.items():
+            if k.lower() != 'content-type':  # already set above
+                resp.headers[k] = v
+        return resp
 
 
 # ---------------------------------------------------------------------------
