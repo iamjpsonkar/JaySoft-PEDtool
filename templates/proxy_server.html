@@ -638,49 +638,6 @@
     }
 
     /* ------------------------------------------------------------------ */
-    /*  Health check & Status bar                                         */
-    /* ------------------------------------------------------------------ */
-
-    async function checkHealth() {
-        var dot = document.getElementById('healthDot');
-        var text = document.getElementById('healthText');
-        try {
-            var data = await api('/health', 'GET');
-            dot.className = 'status-dot ok';
-            text.textContent = 'Server: ' + (data.status || 'healthy') +
-                ' | DB: ' + (data.database || 'ok') +
-                ' | Proxies: ' + (data.proxy_count !== undefined ? data.proxy_count : '?') +
-                ' | Mocks: ' + (data.mock_count !== undefined ? data.mock_count : '?');
-        } catch (e) {
-            dot.className = 'status-dot err';
-            text.textContent = 'Server: unreachable';
-        }
-    }
-
-    async function loadRateLimitInfo(identifier) {
-        if (!identifier) {
-            document.getElementById('rateLimitDisplay').style.display = 'none';
-            return;
-        }
-        try {
-            var data = await api('/proxy/ratelimit/' + encodeURIComponent(identifier) + '/', 'GET');
-            var el = document.getElementById('rateLimitDisplay');
-            el.style.display = 'inline';
-            if (data.max_requests === 'unlimited') {
-                el.textContent = 'Rate limit: unlimited';
-            } else {
-                el.textContent = 'Rate limit: ' + data.current_count + '/' + data.max_requests +
-                    ' (' + data.remaining + ' remaining, ' + data.window_seconds + 's window)';
-            }
-        } catch (e) {
-            document.getElementById('rateLimitDisplay').style.display = 'none';
-        }
-    }
-
-    // Check health on load
-    checkHealth();
-
-    /* ------------------------------------------------------------------ */
     /*  View Modal                                                        */
     /* ------------------------------------------------------------------ */
 
@@ -1030,9 +987,6 @@
             document.getElementById('mock_proxy_id').value = data.identifier;
             document.getElementById('mocks_proxy_id').value = data.identifier;
             document.getElementById('lookup_id').value = data.identifier;
-            document.getElementById('history_proxy_id').value = data.identifier;
-            loadProxyList();
-            loadRateLimitInfo(data.identifier);
         } catch (e) {
             showToast((e.data && e.data.error) || 'Registration failed', 'error');
             showResponse('mainResponse', e.data || e);
@@ -1046,7 +1000,7 @@
         try {
             var data = await api('/proxy/get/' + encodeURIComponent(id) + '/', 'GET');
             showResponse('lookupResponse', data);
-            loadRateLimitInfo(id);
+
         } catch (e) {
             showToast('Lookup failed', 'error');
             showResponse('lookupResponse', e.data || e);
@@ -1207,7 +1161,7 @@
         try {
             var data = await api('/proxy/get/' + encodeURIComponent(id) + '/', 'GET');
             renderMocksTable(data.mocked_requests || {});
-            loadRateLimitInfo(id);
+
         } catch (e) {
             showToast('Failed to load mocks', 'error');
         }
@@ -1421,247 +1375,6 @@
             cancelDelete(idx, document.querySelector('#mock-row-' + idx + ' td:last-child button'));
         }
     }
-
-    /* ------------------------------------------------------------------ */
-    /*  Proxy List & Management                                           */
-    /* ------------------------------------------------------------------ */
-
-    async function loadProxyList() {
-        try {
-            var data = await api('/proxy/list/', 'GET');
-            renderProxyList(data.proxies || data || []);
-        } catch (e) {
-            showToast('Failed to load proxy list', 'error');
-        }
-    }
-
-    function renderProxyList(proxies) {
-        var container = document.getElementById('proxyListContainer');
-        if (!proxies || proxies.length === 0) {
-            container.innerHTML = '<div class="empty-state"><p>No proxies registered yet.</p></div>';
-            return;
-        }
-        var html = '<table class="mock-table">' +
-            '<thead><tr><th>Identifier</th><th>API Domain</th><th>Mocks</th><th>Created</th><th>Actions</th></tr></thead><tbody>';
-        proxies.forEach(function(p, idx) {
-            html += '<tr id="proxy-row-' + idx + '">' +
-                '<td style="font-family:var(--mono);font-size:0.85rem;font-weight:600;">' + escapeHtml(p.identifier) + '</td>' +
-                '<td style="font-family:var(--mono);font-size:0.82rem;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(p.api_domain) + '</td>' +
-                '<td style="text-align:center;">' + (p.mock_count || 0) + '</td>' +
-                '<td style="font-size:0.82rem;color:var(--gray-text);">' + escapeHtml(p.created_at || '') + '</td>' +
-                '<td style="white-space:nowrap;">' +
-                    '<button class="btn btn-blue btn-sm" onclick="loadMocksForProxy(\'' + escapeAttr(p.identifier) + '\')" title="Load mocks for this proxy">Load Mocks</button> ' +
-                    '<button class="btn btn-outline btn-sm" onclick="startClone(\'' + escapeAttr(p.identifier) + '\')" title="Clone this proxy">Clone</button> ' +
-                    '<button class="btn btn-outline btn-sm" onclick="exportProxy(\'' + escapeAttr(p.identifier) + '\')" title="Export this proxy">Export</button> ' +
-                    '<button class="btn btn-outline btn-sm" id="proxy-del-' + idx + '" onclick="confirmDeleteProxy(' + idx + ',\'' + escapeAttr(p.identifier) + '\')" style="color:var(--red);border-color:var(--red);" title="Delete this proxy">Delete</button>' +
-                '</td>' +
-            '</tr>';
-        });
-        html += '</tbody></table>';
-        container.innerHTML = html;
-    }
-
-    function loadMocksForProxy(identifier) {
-        document.getElementById('mocks_proxy_id').value = identifier;
-        document.getElementById('mock_proxy_id').value = identifier;
-        document.getElementById('history_proxy_id').value = identifier;
-        loadMocks();
-        loadRateLimitInfo(identifier);
-        // Scroll to mocks section
-        document.getElementById('mocksContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-
-    function startClone(sourceId) {
-        document.getElementById('cloneSource').value = sourceId;
-        document.getElementById('cloneTarget').value = '';
-        document.getElementById('cloneSection').style.display = 'block';
-        document.getElementById('cloneTarget').focus();
-    }
-
-    async function doClone() {
-        var source = document.getElementById('cloneSource').value.trim();
-        var target = document.getElementById('cloneTarget').value.trim();
-        if (!source || !target) { showToast('Both source and target identifiers are required', 'error'); return; }
-
-        try {
-            var data = await api('/proxy/clone/', 'POST', {
-                source_identifier: source,
-                target_identifier: target
-            });
-            showToast('Cloned "' + source + '" to "' + target + '" (' + (data.mock_count || 0) + ' mocks)', 'success');
-            document.getElementById('cloneSection').style.display = 'none';
-            loadProxyList();
-        } catch (e) {
-            showToast((e.data && e.data.error) || 'Clone failed', 'error');
-        }
-    }
-
-    async function exportProxy(identifier) {
-        try {
-            var data = await api('/proxy/export/' + encodeURIComponent(identifier) + '/', 'GET');
-            showResponse('exportResponse', data);
-        } catch (e) {
-            showToast('Export failed', 'error');
-        }
-    }
-
-    async function exportAll() {
-        try {
-            var data = await api('/proxy/export/all/', 'GET');
-            showResponse('exportResponse', data);
-        } catch (e) {
-            showToast('Export failed', 'error');
-        }
-    }
-
-    function toggleImportSection() {
-        var el = document.getElementById('importSection');
-        el.style.display = el.style.display === 'none' ? 'block' : 'none';
-    }
-
-    async function doImport() {
-        var raw = document.getElementById('importJson').value.trim();
-        if (!raw) { showToast('Paste JSON to import', 'error'); return; }
-        var parsed;
-        try { parsed = JSON.parse(raw); }
-        catch (e) { showToast('Invalid JSON', 'error'); return; }
-
-        try {
-            var data = await api('/proxy/import/', 'POST', parsed);
-            showToast('Import successful', 'success');
-            showResponse('exportResponse', data);
-            document.getElementById('importSection').style.display = 'none';
-            document.getElementById('importJson').value = '';
-            loadProxyList();
-        } catch (e) {
-            showToast((e.data && e.data.error) || 'Import failed', 'error');
-            showResponse('exportResponse', e.data || e);
-        }
-    }
-
-    function confirmDeleteProxy(idx, identifier) {
-        var btn = document.getElementById('proxy-del-' + idx);
-        if (!btn) return;
-        var td = btn.parentElement;
-        var original = td.innerHTML;
-        td.innerHTML =
-            '<div class="confirm-delete">' +
-                '<span>Delete proxy?</span>' +
-                '<button class="btn btn-red btn-sm" onclick="doDeleteProxy(\'' + escapeAttr(identifier) + '\')">Yes</button> ' +
-                '<button class="btn btn-outline btn-sm" onclick="cancelDeleteProxy(this)">No</button>' +
-            '</div>';
-        td.dataset.originalHtml = original;
-    }
-
-    function cancelDeleteProxy(btn) {
-        var td = btn.closest('td');
-        if (td && td.dataset.originalHtml) {
-            td.innerHTML = td.dataset.originalHtml;
-        }
-    }
-
-    async function doDeleteProxy(identifier) {
-        try {
-            await api('/proxy/delete/' + encodeURIComponent(identifier) + '/', 'DELETE');
-            showToast('Proxy "' + identifier + '" deleted', 'success');
-            loadProxyList();
-        } catch (e) {
-            showToast((e.data && e.data.error) || 'Delete failed', 'error');
-            loadProxyList();
-        }
-    }
-
-    /* ------------------------------------------------------------------ */
-    /*  Request History                                                    */
-    /* ------------------------------------------------------------------ */
-
-    var _historyData = [];
-
-    async function loadHistory() {
-        var id = document.getElementById('history_proxy_id').value.trim();
-        if (!id) { showToast('Identifier is required', 'error'); return; }
-
-        try {
-            var data = await api('/proxy/history/' + encodeURIComponent(id) + '/', 'GET');
-            _historyData = data.history || data || [];
-            renderHistory(_historyData);
-            loadRateLimitInfo(id);
-        } catch (e) {
-            showToast('Failed to load history', 'error');
-        }
-    }
-
-    async function clearHistory() {
-        var id = document.getElementById('history_proxy_id').value.trim();
-        if (!id) { showToast('Identifier is required', 'error'); return; }
-        if (!confirm('Clear all request history for "' + id + '"?')) return;
-
-        try {
-            var data = await api('/proxy/history/' + encodeURIComponent(id) + '/clear/', 'POST');
-            showToast('History cleared (' + (data.deleted || 0) + ' entries)', 'success');
-            _historyData = [];
-            renderHistory([]);
-        } catch (e) {
-            showToast((e.data && e.data.error) || 'Clear failed', 'error');
-        }
-    }
-
-    function renderHistory(history) {
-        var container = document.getElementById('historyContainer');
-        if (!history || history.length === 0) {
-            container.innerHTML = '<div class="empty-state"><p>No request history for this proxy.</p></div>';
-            return;
-        }
-        var html = '<table class="mock-table">' +
-            '<thead><tr><th>Timestamp</th><th>Method</th><th>Endpoint</th><th>Source</th><th>Status</th><th>Duration</th></tr></thead><tbody>';
-        history.forEach(function(h, idx) {
-            var sourceClass = 'source-' + (h.source || 'forward');
-            html += '<tr style="cursor:pointer;" onclick="toggleHistoryDetail(' + idx + ')">' +
-                '<td style="font-size:0.82rem;color:var(--gray-text);white-space:nowrap;">' + escapeHtml(h.created_at || '') + '</td>' +
-                '<td><span class="method-badge method-' + (h.method || 'GET') + '">' + escapeHtml(h.method || '') + '</span></td>' +
-                '<td style="font-family:var(--mono);font-size:0.82rem;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(h.endpoint || '') + '</td>' +
-                '<td><span class="source-badge ' + sourceClass + '">' + escapeHtml(h.source || 'forward') + '</span></td>' +
-                '<td>' + (h.response_status !== null && h.response_status !== undefined ? '<span class="method-badge ' + (h.response_status < 400 ? 'method-GET' : 'method-DELETE') + '">' + h.response_status + '</span>' : '-') + '</td>' +
-                '<td style="font-size:0.82rem;">' + (h.duration_ms !== null && h.duration_ms !== undefined ? h.duration_ms + ' ms' : '-') + '</td>' +
-            '</tr>';
-            // Detail row (hidden)
-            html += '<tr class="history-detail" id="hist-detail-' + idx + '">' +
-                '<td colspan="6">' +
-                    '<div class="history-detail-label">Request Headers</div>' +
-                    '<pre>' + escapeHtml(formatJsonSafe(h.request_headers)) + '</pre>' +
-                    '<div class="history-detail-label">Request Body</div>' +
-                    '<pre>' + escapeHtml(h.request_body || '(empty)') + '</pre>' +
-                    '<div class="history-detail-label">Response Body</div>' +
-                    '<pre>' + escapeHtml(h.response_body || '(empty)') + '</pre>' +
-                    (h.query_params ? '<div class="history-detail-label">Query Params</div><pre>' + escapeHtml(h.query_params) + '</pre>' : '') +
-                '</td>' +
-            '</tr>';
-        });
-        html += '</tbody></table>';
-        container.innerHTML = html;
-    }
-
-    function formatJsonSafe(val) {
-        if (!val) return '(empty)';
-        if (typeof val === 'string') {
-            try { return JSON.stringify(JSON.parse(val), null, 2); }
-            catch (e) { return val; }
-        }
-        try { return JSON.stringify(val, null, 2); }
-        catch (e) { return String(val); }
-    }
-
-    function toggleHistoryDetail(idx) {
-        var row = document.getElementById('hist-detail-' + idx);
-        if (row) {
-            row.classList.toggle('visible');
-        }
-    }
-
-    /* ------------------------------------------------------------------ */
-    /*  Auto-load proxy list on page load                                 */
-    /* ------------------------------------------------------------------ */
-    loadProxyList();
 
     </script>
 </body>
