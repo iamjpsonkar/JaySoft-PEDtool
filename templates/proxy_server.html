@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PED Tools | Proxy Server</title>
+    <style>
+        :root {
+            --blue: #007bff;
+            --blue-dark: #0056b3;
+            --blue-light: #e8f0fe;
+            --green: #28a745;
+            --green-dark: #218838;
+            --red: #dc3545;
+            --red-dark: #c82333;
+            --orange: #fd7e14;
+            --gray-bg: #f0f2f5;
+            --gray-border: #d1d5db;
+            --gray-text: #555;
+            --white: #fff;
+            --shadow: 0 2px 8px rgba(0,0,0,0.08);
+            --radius: 8px;
+            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            --mono: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+        }
+        *, *::before, *::after { box-sizing: border-box; }
+        body { font-family: var(--font); margin: 0; background: var(--gray-bg); color: #333; }
+
+        /* --- Top nav --- */
+        .topbar {
+            background: var(--blue); color: var(--white); padding: 12px 24px;
+            display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+        }
+        .topbar h1 { margin: 0; font-size: 1.25rem; flex: 1; }
+        .topbar a {
+            color: var(--white); text-decoration: none; font-size: 0.9rem;
+            padding: 6px 14px; border: 1px solid rgba(255,255,255,0.4);
+            border-radius: var(--radius); transition: background 0.2s;
+        }
+        .topbar a:hover { background: rgba(255,255,255,0.15); }
+
+        /* --- Layout --- */
+        .page { max-width: 1200px; margin: 0 auto; padding: 24px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+
+        /* --- Cards --- */
+        .card {
+            background: var(--white); border-radius: var(--radius);
+            box-shadow: var(--shadow); padding: 20px; position: relative;
+        }
+        .card h2 { margin: 0 0 16px; font-size: 1.1rem; color: var(--blue); }
+        .card.full { grid-column: 1 / -1; }
+
+        /* --- Form elements --- */
+        label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85rem; }
+        .hint { font-size: 0.78rem; color: var(--gray-text); margin-bottom: 8px; }
+        input[type="text"], input[type="url"], textarea, select {
+            width: 100%; padding: 9px 12px; border: 1px solid var(--gray-border);
+            border-radius: 6px; font-size: 0.9rem; font-family: var(--font);
+            background: #fafafa; transition: border-color 0.2s;
+        }
+        input:focus, textarea:focus, select:focus {
+            outline: none; border-color: var(--blue); background: var(--white);
+        }
+        textarea { font-family: var(--mono); font-size: 0.82rem; resize: vertical; min-height: 120px; }
+        select { cursor: pointer; }
+        .field { margin-bottom: 14px; }
+
+        /* --- Buttons --- */
+        .btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 9px 18px; border: none; border-radius: 6px;
+            font-size: 0.9rem; font-weight: 600; cursor: pointer;
+            transition: background 0.2s, transform 0.1s; color: var(--white);
+        }
+        .btn:active { transform: scale(0.97); }
+        .btn-blue { background: var(--blue); }
+        .btn-blue:hover { background: var(--blue-dark); }
+        .btn-green { background: var(--green); }
+        .btn-green:hover { background: var(--green-dark); }
+        .btn-red { background: var(--red); }
+        .btn-red:hover { background: var(--red-dark); }
+        .btn-sm { padding: 5px 10px; font-size: 0.78rem; }
+        .btn-outline {
+            background: transparent; border: 1px solid var(--gray-border);
+            color: #555;
+        }
+        .btn-outline:hover { background: #f5f5f5; }
+
+        /* --- Pill tags for placeholders --- */
+        .placeholder-bar {
+            display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px;
+        }
+        .pill {
+            padding: 4px 10px; border-radius: 20px; font-size: 0.75rem;
+            cursor: pointer; border: 1px solid var(--gray-border);
+            background: var(--white); transition: all 0.2s; user-select: none;
+        }
+        .pill:hover { background: var(--blue-light); border-color: var(--blue); color: var(--blue); }
+
+        /* --- Mock builder rows --- */
+        .mock-row {
+            display: flex; gap: 8px; align-items: center; margin-bottom: 8px;
+        }
+        .mock-row input { flex: 1; }
+        .mock-row select { width: 160px; flex: none; }
+        .mock-row .btn { flex: none; }
+
+        /* --- Response area --- */
+        .response-box {
+            background: #1e1e2e; color: #cdd6f4; border-radius: var(--radius);
+            padding: 16px; font-family: var(--mono); font-size: 0.82rem;
+            white-space: pre-wrap; word-break: break-word;
+            max-height: 400px; overflow-y: auto; position: relative;
+            display: none;
+        }
+        .response-box.visible { display: block; }
+        .response-box .copy-btn {
+            position: absolute; top: 8px; right: 8px;
+            background: rgba(255,255,255,0.1); color: #cdd6f4;
+            border: 1px solid rgba(255,255,255,0.2); padding: 4px 10px;
+            border-radius: 4px; cursor: pointer; font-size: 0.75rem;
+        }
+        .response-box .copy-btn:hover { background: rgba(255,255,255,0.2); }
+
+        /* --- Existing mocks table --- */
+        .mock-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        .mock-table th {
+            text-align: left; padding: 8px 10px; background: var(--blue-light);
+            color: var(--blue-dark); font-weight: 600; border-bottom: 2px solid var(--blue);
+        }
+        .mock-table td { padding: 8px 10px; border-bottom: 1px solid #eee; vertical-align: top; }
+        .mock-table tr:hover td { background: #f8f9fa; }
+        .method-badge {
+            display: inline-block; padding: 2px 8px; border-radius: 4px;
+            font-size: 0.75rem; font-weight: 700; color: var(--white);
+        }
+        .method-GET { background: var(--green); }
+        .method-POST { background: var(--blue); }
+        .method-PUT { background: var(--orange); }
+        .method-PATCH { background: #6f42c1; }
+        .method-DELETE { background: var(--red); }
+        .mock-preview {
+            font-family: var(--mono); font-size: 0.78rem; color: var(--gray-text);
+            max-width: 400px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+
+        /* --- Toast --- */
+        .toast {
+            position: fixed; bottom: 24px; right: 24px; padding: 12px 20px;
+            border-radius: var(--radius); color: var(--white); font-weight: 600;
+            font-size: 0.9rem; z-index: 1000; opacity: 0;
+            transition: opacity 0.3s, transform 0.3s;
+            transform: translateY(10px);
+        }
+        .toast.visible { opacity: 1; transform: translateY(0); }
+        .toast-success { background: var(--green); }
+        .toast-error { background: var(--red); }
+
+        /* --- Tabs --- */
+        .tabs { display: flex; gap: 0; margin-bottom: 0; }
+        .tab {
+            padding: 10px 20px; cursor: pointer; font-weight: 600;
+            font-size: 0.85rem; border: 1px solid var(--gray-border);
+            border-bottom: none; border-radius: var(--radius) var(--radius) 0 0;
+            background: #f5f5f5; color: var(--gray-text); transition: all 0.2s;
+        }
+        .tab.active { background: var(--white); color: var(--blue); border-bottom: 1px solid var(--white); margin-bottom: -1px; }
+        .tab-content {
+            border: 1px solid var(--gray-border); border-radius: 0 var(--radius) var(--radius) var(--radius);
+            padding: 16px; background: var(--white); display: none;
+        }
+        .tab-content.active { display: block; }
+
+        /* --- Empty state --- */
+        .empty-state { text-align: center; padding: 30px; color: var(--gray-text); }
+        .empty-state p { font-size: 0.9rem; }
+
+        /* --- Modal --- */
+        .modal-overlay {
+            display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+            z-index: 900; align-items: center; justify-content: center;
+        }
+        .modal-overlay.visible { display: flex; }
+        .modal {
+            background: var(--white); border-radius: var(--radius); box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+            width: 90%; max-width: 700px; max-height: 85vh; display: flex; flex-direction: column;
+            overflow: hidden;
+        }
+        .modal-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 20px; border-bottom: 1px solid var(--gray-border);
+        }
+        .modal-header h3 { margin: 0; font-size: 1rem; color: var(--blue); }
+        .modal-close {
+            background: none; border: none; font-size: 1.4rem; cursor: pointer;
+            color: var(--gray-text); line-height: 1; padding: 4px 8px; border-radius: 4px;
+        }
+        .modal-close:hover { background: #f0f0f0; color: #333; }
+        .modal-body {
+            flex: 1; overflow-y: auto; padding: 20px;
+        }
+        .modal-body pre {
+            background: #1e1e2e; color: #cdd6f4; padding: 16px; border-radius: var(--radius);
+            font-family: var(--mono); font-size: 0.82rem; white-space: pre-wrap;
+            word-break: break-word; margin: 0; line-height: 1.5;
+        }
+        .modal-footer {
+            padding: 12px 20px; border-top: 1px solid var(--gray-border);
+            display: flex; gap: 8px; justify-content: flex-end;
+        }
+
+        /* --- Delete confirm inline --- */
+        .confirm-delete {
+            display: inline-flex; align-items: center; gap: 6px;
+        }
+        .confirm-delete span { font-size: 0.78rem; color: var(--red); font-weight: 600; }
+
+        /* --- URL pattern builder --- */
+        .pattern-help {
+            background: var(--blue-light); padding: 10px 14px; border-radius: 6px;
+            font-size: 0.8rem; margin-bottom: 12px; color: #333;
+        }
+        .pattern-help code {
+            background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px;
+            font-family: var(--mono);
+        }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>Proxy Server &amp; Mock Builder</h1>
+        <a href="/proxy/helper">Documentation</a>
+        <a href="/">Home</a>
+    </div>
+
+    <div class="page">
+        <!-- Row 1: Register + Lookup side by side -->
+        <div class="grid">
+            <!-- Register Proxy -->
+            <div class="card">
+                <h2>1. Register Proxy Server</h2>
+                <div class="field">
+                    <label for="api_domain">API Domain</label>
+                    <div class="hint">Base URL of the real API to proxy (e.g. https://api.example.com)</div>
+                    <input type="url" id="api_domain" placeholder="https://api.example.com" required />
+                </div>
+                <div class="field">
+                    <label for="reg_identifier">Identifier <span style="font-weight:400;color:var(--gray-text)">(optional)</span></label>
+                    <div class="hint">Leave blank to auto-generate. Use a memorable name like "payments-v2"</div>
+                    <input type="text" id="reg_identifier" placeholder="my-proxy" />
+                </div>
+                <button class="btn btn-blue" onclick="registerProxy()">Register Proxy</button>
+            </div>
+
+            <!-- Lookup Proxy -->
+            <div class="card">
+                <h2>Lookup Proxy</h2>
+                <div class="field">
+                    <label for="lookup_id">Proxy Identifier</label>
+                    <div class="hint">Enter the identifier to view its config and mocks</div>
+                    <input type="text" id="lookup_id" placeholder="my-proxy" />
+                </div>
+                <button class="btn btn-blue" onclick="lookupProxy()">Lookup</button>
+                <div id="lookupResponse" class="response-box" style="margin-top:14px;"></div>
+            </div>
+        </div>
+
+        <!-- Row 2: Mock Builder (full width) -->
+        <div style="margin-top:24px;">
+            <div class="card full">
+                <h2>2. Create Mock Response</h2>
+
+                <div class="grid" style="gap:14px;">
+                    <div class="field">
+                        <label for="mock_proxy_id">Proxy Identifier</label>
+                        <input type="text" id="mock_proxy_id" placeholder="my-proxy" required />
+                    </div>
+                    <div style="display:flex;gap:14px;">
+                        <div class="field" style="flex:0 0 140px;">
+                            <label for="mock_method">Method</label>
+                            <select id="mock_method">
+                                <option value="GET">GET</option>
+                                <option value="POST">POST</option>
+                                <option value="PUT">PUT</option>
+                                <option value="PATCH">PATCH</option>
+                                <option value="DELETE">DELETE</option>
+                            </select>
+                        </div>
+                        <div class="field" style="flex:1;">
+                            <label for="mock_endpoint">Endpoint</label>
+                            <input type="text" id="mock_endpoint" placeholder="/users/123 or /orders/<order_id>/items" required />
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pattern-help">
+                    <strong>URL Patterns:</strong>
+                    Exact path <code>/users/123</code> |
+                    Dynamic segments <code>/orders/&lt;id&gt;/items</code> |
+                    Full URL <code>https://api.example.com/users/123</code>
+                </div>
+
+                <!-- Tabs: Visual Builder vs Raw JSON -->
+                <div class="tabs">
+                    <div class="tab active" onclick="switchTab('visual')">Visual Builder</div>
+                    <div class="tab" onclick="switchTab('raw')">Raw JSON</div>
+                </div>
+
+                <!-- Visual Builder Tab -->
+                <div class="tab-content active" id="tab-visual">
+                    <p style="font-size:0.85rem;color:var(--gray-text);margin:0 0 10px;">
+                        Build your mock response field by field. Choose a value type to insert dynamic placeholders.
+                    </p>
+                    <div id="mockRows">
+                        <div class="mock-row">
+                            <input type="text" placeholder="key" class="mk" />
+                            <select class="mv-type" onchange="onTypeChange(this)">
+                                <option value="static">Static Value</option>
+                                <option value="headerget">headerget()</option>
+                                <option value="jsonget">jsonget()</option>
+                                <option value="paramget">paramget()</option>
+                                <option value="pathparamget">pathparamget()</option>
+                                <option value="upper">upper(n)</option>
+                                <option value="lower">lower(n)</option>
+                                <option value="chars">chars(n)</option>
+                                <option value="digit">digit(n)</option>
+                                <option value="alnum">alnum([...])</option>
+                                <option value="snippet">snippet()</option>
+                            </select>
+                            <input type="text" placeholder="value" class="mv" />
+                            <button class="btn btn-red btn-sm" onclick="removeRow(this)" title="Remove">&times;</button>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:8px;margin-top:8px;">
+                        <button class="btn btn-outline btn-sm" onclick="addRow()">+ Add Field</button>
+                        <button class="btn btn-outline btn-sm" onclick="addNestedRow()">+ Add Nested Object</button>
+                    </div>
+                    <div style="margin-top:12px;">
+                        <label>Preview</label>
+                        <pre id="visualPreview" style="background:#f5f5f5;padding:12px;border-radius:6px;font-family:var(--mono);font-size:0.82rem;min-height:60px;margin:0;"></pre>
+                    </div>
+                </div>
+
+                <!-- Raw JSON Tab -->
+                <div class="tab-content" id="tab-raw">
+                    <label for="mock_json_raw">Mock Response JSON</label>
+                    <div class="placeholder-bar">
+                        <span class="pill" onclick="insertPlaceholder('headerget(\"Header-Name\")')">headerget</span>
+                        <span class="pill" onclick="insertPlaceholder('jsonget(\"key\")')">jsonget</span>
+                        <span class="pill" onclick="insertPlaceholder('paramget(\"param\")')">paramget</span>
+                        <span class="pill" onclick="insertPlaceholder('pathparamget(\"prefix\")')">pathparamget</span>
+                        <span class="pill" onclick="insertPlaceholder('upper(8)')">upper</span>
+                        <span class="pill" onclick="insertPlaceholder('lower(8)')">lower</span>
+                        <span class="pill" onclick="insertPlaceholder('chars(8)')">chars</span>
+                        <span class="pill" onclick="insertPlaceholder('digit(6)')">digit</span>
+                        <span class="pill" onclick="insertPlaceholder('alnum([3,2,4,3])')">alnum</span>
+                        <span class="pill" onclick="insertPlaceholder('snippet(\"1 + 1\")')">snippet</span>
+                    </div>
+                    <textarea id="mock_json_raw" placeholder='{"status": "ok", "id": "digit(6)"}'></textarea>
+                </div>
+
+                <div style="margin-top:14px;display:flex;gap:10px;">
+                    <button class="btn btn-green" onclick="createMock()">Save Mock</button>
+                    <button class="btn btn-outline" onclick="testMock()">Test Mock</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Row 3: Existing mocks + Response -->
+        <div style="margin-top:24px;">
+            <div class="card full">
+                <h2>Existing Mocks</h2>
+                <div class="field" style="max-width:300px;">
+                    <label for="mocks_proxy_id">Proxy Identifier</label>
+                    <div style="display:flex;gap:8px;">
+                        <input type="text" id="mocks_proxy_id" placeholder="my-proxy" />
+                        <button class="btn btn-blue btn-sm" onclick="loadMocks()">Load</button>
+                    </div>
+                </div>
+                <div id="mocksContainer">
+                    <div class="empty-state">
+                        <p>Enter a proxy identifier and click Load to see its mocks.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Response area -->
+        <div style="margin-top:24px;">
+            <div id="mainResponse" class="response-box"></div>
+        </div>
+    </div>
+
+    <!-- View Mock Modal -->
+    <div id="viewModal" class="modal-overlay" onclick="if(event.target===this)closeViewModal()">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="viewModalTitle">Mock Response</h3>
+                <button class="modal-close" onclick="closeViewModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <pre id="viewModalBody"></pre>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline btn-sm" onclick="copyViewModal()">Copy</button>
+                <button class="btn btn-blue btn-sm" onclick="editFromViewModal()">Edit</button>
+                <button class="btn btn-outline btn-sm" onclick="closeViewModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast"></div>
+
+    <script>
+    /* ------------------------------------------------------------------ */
+    /*  Helpers                                                           */
+    /* ------------------------------------------------------------------ */
+
+    function showToast(msg, type) {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.className = 'toast toast-' + type + ' visible';
+        setTimeout(() => t.classList.remove('visible'), 3000);
+    }
+
+    function showResponse(elId, data) {
+        const el = document.getElementById(elId);
+        el.innerHTML = '<button class="copy-btn" onclick="copyResponse(this)">Copy</button>' +
+                        escapeHtml(JSON.stringify(data, null, 2));
+        el.classList.add('visible');
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function escapeHtml(s) {
+        const d = document.createElement('div');
+        d.appendChild(document.createTextNode(s));
+        return d.innerHTML;
+    }
+
+    function copyResponse(btn) {
+        const text = btn.parentElement.textContent.replace('Copy', '').trim();
+        navigator.clipboard.writeText(text);
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy', 1500);
+    }
+
+    function escapeAttr(s) {
+        return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+    }
+
+    async function api(url, method, body) {
+        const opts = { method, headers: { 'Content-Type': 'application/json' } };
+        if (body) opts.body = JSON.stringify(body);
+        const res = await fetch(url, opts);
+        let data;
+        try { data = await res.json(); } catch (_) { data = { raw: await res.clone().text().catch(() => 'No response body') }; }
+        if (!res.ok) throw { status: res.status, data };
+        return data;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  View Modal                                                        */
+    /* ------------------------------------------------------------------ */
+
+    // State for the currently viewed mock (used by Edit from modal)
+    let _viewModalMock = { endpoint: '', method: '', body: '' };
+
+    function openViewModal(endpoint, method, bodyObj) {
+        _viewModalMock = { endpoint, method, body: bodyObj };
+        document.getElementById('viewModalTitle').textContent =
+            method + ' ' + endpoint;
+        document.getElementById('viewModalBody').textContent =
+            JSON.stringify(bodyObj, null, 2);
+        document.getElementById('viewModal').classList.add('visible');
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closeViewModal() {
+        document.getElementById('viewModal').classList.remove('visible');
+        document.body.style.overflow = '';
+    }
+
+    function copyViewModal() {
+        const text = document.getElementById('viewModalBody').textContent;
+        navigator.clipboard.writeText(text);
+        showToast('Copied to clipboard', 'success');
+    }
+
+    function editFromViewModal() {
+        closeViewModal();
+        editMock(_viewModalMock.endpoint, _viewModalMock.method, _viewModalMock.body);
+    }
+
+    // Close on Escape
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeViewModal();
+    });
+
+    /* ------------------------------------------------------------------ */
+    /*  Tab switching                                                     */
+    /* ------------------------------------------------------------------ */
+
+    function switchTab(name) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        if (name === 'visual') {
+            document.querySelectorAll('.tab')[0].classList.add('active');
+            document.getElementById('tab-visual').classList.add('active');
+        } else {
+            document.querySelectorAll('.tab')[1].classList.add('active');
+            document.getElementById('tab-raw').classList.add('active');
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Visual mock builder                                               */
+    /* ------------------------------------------------------------------ */
+
+    const TYPE_HINTS = {
+        static: 'Any static value (string, number, boolean)',
+        headerget: 'Header name, e.g. Authorization',
+        jsonget: 'JSON body key, e.g. user_id',
+        paramget: 'Query param name, e.g. page',
+        pathparamget: 'URL prefix, e.g. orders',
+        upper: 'Length, e.g. 8',
+        lower: 'Length, e.g. 10',
+        chars: 'Length, e.g. 6',
+        digit: 'Length, e.g. 5',
+        alnum: 'Pattern, e.g. [3,2,4,1]',
+        snippet: 'Expression, e.g. len("hello")',
+    };
+
+    const ALL_TYPES = ['static','headerget','jsonget','paramget','pathparamget',
+                       'upper','lower','chars','digit','alnum','snippet'];
+
+    function onTypeChange(sel) {
+        const row = sel.closest('.mock-row');
+        const valInput = row.querySelector('.mv');
+        const type = sel.value;
+        valInput.placeholder = TYPE_HINTS[type] || 'value';
+        valInput.value = '';
+    }
+
+    function buildRowHtml(key, valType, val) {
+        key = key || '';
+        valType = valType || 'static';
+        val = val || '';
+        const optHtml = ALL_TYPES.map(o =>
+            '<option value="' + o + '"' + (o===valType?' selected':'') + '>' +
+            (o === 'static' ? 'Static Value' : o+'()') + '</option>'
+        ).join('');
+        return '<div class="mock-row">' +
+            '<input type="text" placeholder="key" class="mk" value="' + escapeAttr(key) + '" oninput="updatePreview()" />' +
+            '<select class="mv-type" onchange="onTypeChange(this);updatePreview();">' + optHtml + '</select>' +
+            '<input type="text" placeholder="' + (TYPE_HINTS[valType]||'value') + '" class="mv" value="' + escapeAttr(val) + '" oninput="updatePreview()" />' +
+            '<button class="btn btn-red btn-sm" onclick="removeRow(this)" title="Remove">&times;</button>' +
+            '</div>';
+    }
+
+    function addRow(key, valType, val) {
+        document.getElementById('mockRows').insertAdjacentHTML('beforeend', buildRowHtml(key, valType, val));
+        updatePreview();
+    }
+
+    function addNestedRow() {
+        var key = prompt('Enter the key name for the nested object:', 'details');
+        if (!key) return;
+        var html = '<div class="mock-row" data-nested="' + escapeAttr(key) + '">' +
+            '<input type="text" value="' + escapeAttr(key) + '" class="mk" style="font-weight:700;" disabled />' +
+            '<span style="flex:1;font-size:0.8rem;color:var(--gray-text);">(nested object — prefix child keys with "' + escapeAttr(key) + '.")</span>' +
+            '<button class="btn btn-red btn-sm" onclick="removeRow(this)" title="Remove">&times;</button>' +
+            '</div>';
+        document.getElementById('mockRows').insertAdjacentHTML('beforeend', html);
+        addRow(key + '.child_key', 'static', '');
+    }
+
+    function removeRow(btn) {
+        btn.closest('.mock-row').remove();
+        updatePreview();
+    }
+
+    function buildValueString(type, val) {
+        if (type === 'static') return val;
+        return type + '(' + val + ')';
+    }
+
+    // Parse a value string like "digit(6)" back into {type, val}
+    function parseValueString(s) {
+        if (typeof s !== 'string') return { type: 'static', val: String(s) };
+        for (var i = 0; i < ALL_TYPES.length; i++) {
+            var t = ALL_TYPES[i];
+            if (t !== 'static' && s.startsWith(t + '(') && s.endsWith(')')) {
+                return { type: t, val: s.slice(t.length + 1, -1) };
+            }
+        }
+        return { type: 'static', val: s };
+    }
+
+    function getVisualMockJson() {
+        var rows = document.querySelectorAll('#mockRows .mock-row');
+        var root = {};
+        rows.forEach(function(row) {
+            var keyInput = row.querySelector('.mk');
+            var typeSelect = row.querySelector('.mv-type');
+            var valInput = row.querySelector('.mv');
+            if (!keyInput || !typeSelect || !valInput) return;
+            var key = keyInput.value.trim();
+            var type = typeSelect.value;
+            var val = valInput.value.trim();
+            if (!key) return;
+
+            var value = buildValueString(type, val);
+            var parts = key.split('.');
+            var target = root;
+            for (var i = 0; i < parts.length - 1; i++) {
+                if (!(parts[i] in target) || typeof target[parts[i]] !== 'object') {
+                    target[parts[i]] = {};
+                }
+                target = target[parts[i]];
+            }
+            target[parts[parts.length - 1]] = value;
+        });
+        return root;
+    }
+
+    function updatePreview() {
+        var obj = getVisualMockJson();
+        document.getElementById('visualPreview').textContent = JSON.stringify(obj, null, 2);
+    }
+
+    // Load a JSON object into the visual builder rows
+    function loadIntoVisualBuilder(obj, prefix) {
+        prefix = prefix || '';
+        for (var key in obj) {
+            var fullKey = prefix ? prefix + '.' + key : key;
+            var val = obj[key];
+            if (val && typeof val === 'object' && !Array.isArray(val)) {
+                loadIntoVisualBuilder(val, fullKey);
+            } else {
+                var parsed = parseValueString(val);
+                addRow(fullKey, parsed.type, parsed.val);
+            }
+        }
+    }
+
+    // Initialize
+    document.querySelectorAll('#mockRows .mk, #mockRows .mv').forEach(function(el) {
+        el.addEventListener('input', updatePreview);
+    });
+    updatePreview();
+
+    /* ------------------------------------------------------------------ */
+    /*  Raw JSON placeholder insert                                       */
+    /* ------------------------------------------------------------------ */
+
+    function insertPlaceholder(text) {
+        var ta = document.getElementById('mock_json_raw');
+        var start = ta.selectionStart;
+        var end = ta.selectionEnd;
+        var before = ta.value.substring(0, start);
+        var after = ta.value.substring(end);
+        ta.value = before + text + after;
+        ta.selectionStart = ta.selectionEnd = start + text.length;
+        ta.focus();
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  API calls                                                         */
+    /* ------------------------------------------------------------------ */
+
+    async function registerProxy() {
+        var domain = document.getElementById('api_domain').value.trim();
+        var id = document.getElementById('reg_identifier').value.trim();
+        if (!domain) { showToast('API Domain is required', 'error'); return; }
+
+        try {
+            var data = await api('/proxy/create/', 'POST', {
+                api_domain: domain,
+                identifier: id || undefined
+            });
+            showToast('Proxy "' + data.identifier + '" registered!', 'success');
+            showResponse('mainResponse', data);
+            document.getElementById('mock_proxy_id').value = data.identifier;
+            document.getElementById('mocks_proxy_id').value = data.identifier;
+            document.getElementById('lookup_id').value = data.identifier;
+        } catch (e) {
+            showToast((e.data && e.data.error) || 'Registration failed', 'error');
+            showResponse('mainResponse', e.data || e);
+        }
+    }
+
+    async function lookupProxy() {
+        var id = document.getElementById('lookup_id').value.trim();
+        if (!id) { showToast('Identifier is required', 'error'); return; }
+
+        try {
+            var data = await api('/proxy/get/' + encodeURIComponent(id) + '/', 'GET');
+            showResponse('lookupResponse', data);
+        } catch (e) {
+            showToast('Lookup failed', 'error');
+            showResponse('lookupResponse', e.data || e);
+        }
+    }
+
+    function getMockPayload() {
+        var proxyId = document.getElementById('mock_proxy_id').value.trim();
+        var method = document.getElementById('mock_method').value;
+        var endpoint = document.getElementById('mock_endpoint').value.trim();
+
+        if (!proxyId || !endpoint) {
+            showToast('Proxy Identifier and Endpoint are required', 'error');
+            return null;
+        }
+
+        var isVisual = document.getElementById('tab-visual').classList.contains('active');
+        var mock;
+        if (isVisual) {
+            mock = getVisualMockJson();
+        } else {
+            var raw = document.getElementById('mock_json_raw').value.trim();
+            if (!raw) { showToast('Mock JSON is required', 'error'); return null; }
+            try { mock = JSON.parse(raw); }
+            catch(err) { showToast('Invalid JSON in mock response', 'error'); return null; }
+        }
+
+        return {
+            proxy_identifier: proxyId,
+            end_point: endpoint,
+            method: method,
+            mock: mock
+        };
+    }
+
+    async function createMock() {
+        var payload = getMockPayload();
+        if (!payload) return;
+
+        try {
+            var data = await api('/proxy/mock/create/', 'POST', payload);
+            showToast('Mock saved for ' + payload.method + ' ' + payload.end_point, 'success');
+            showResponse('mainResponse', data);
+            if (document.getElementById('mocks_proxy_id').value === payload.proxy_identifier) {
+                loadMocks();
+            }
+        } catch (e) {
+            showToast((e.data && e.data.error) || 'Mock creation failed', 'error');
+            showResponse('mainResponse', e.data || e);
+        }
+    }
+
+    // Replace <param> placeholders with real values via prompt
+    function resolveEndpointParams(endpoint) {
+        var params = endpoint.match(/<(\w+)>/g);
+        if (!params) return endpoint;
+        var resolved = endpoint;
+        for (var i = 0; i < params.length; i++) {
+            var paramName = params[i].slice(1, -1); // strip < >
+            var value = prompt('Enter value for <' + paramName + '>:', 'test_' + paramName);
+            if (value === null) return null; // user cancelled
+            resolved = resolved.replace(params[i], encodeURIComponent(value));
+        }
+        return resolved;
+    }
+
+    async function testMock() {
+        var proxyId = document.getElementById('mock_proxy_id').value.trim();
+        var method = document.getElementById('mock_method').value;
+        var endpoint = document.getElementById('mock_endpoint').value.trim();
+        if (!proxyId || !endpoint) {
+            showToast('Fill in Proxy Identifier and Endpoint first', 'error');
+            return;
+        }
+
+        // Prompt for dynamic param values if endpoint has <param> placeholders
+        var resolvedEndpoint = resolveEndpointParams(endpoint);
+        if (resolvedEndpoint === null) {
+            showToast('Test cancelled', 'error');
+            return;
+        }
+
+        var cleanEndpoint = resolvedEndpoint.startsWith('/') ? resolvedEndpoint.slice(1) : resolvedEndpoint;
+        var url = '/proxy/' + encodeURIComponent(proxyId) + '/' + cleanEndpoint;
+
+        try {
+            var data = await api(url, method, method !== 'GET' ? { test: true } : undefined);
+            showToast('Test request succeeded', 'success');
+            showResponse('mainResponse', data);
+        } catch (e) {
+            showToast('Test request returned ' + (e.status || 'error'), 'error');
+            showResponse('mainResponse', e.data || e);
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Mocks table — Load, Render, View, Edit, Delete                    */
+    /* ------------------------------------------------------------------ */
+
+    async function loadMocks() {
+        var id = document.getElementById('mocks_proxy_id').value.trim();
+        if (!id) { showToast('Identifier is required', 'error'); return; }
+
+        try {
+            var data = await api('/proxy/get/' + encodeURIComponent(id) + '/', 'GET');
+            renderMocksTable(data.mocked_requests || {});
+        } catch (e) {
+            showToast('Failed to load mocks', 'error');
+        }
+    }
+
+    // Store loaded mocks so modal/edit/delete can reference them by index
+    var _loadedMocks = [];
+
+    function renderMocksTable(mocks) {
+        var container = document.getElementById('mocksContainer');
+        _loadedMocks = [];
+        for (var endpoint in mocks) {
+            var methods = mocks[endpoint];
+            for (var method in methods) {
+                _loadedMocks.push({ endpoint: endpoint, method: method, body: methods[method] });
+            }
+        }
+        if (_loadedMocks.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>No mocks configured for this proxy.</p></div>';
+            return;
+        }
+        var html = '<table class="mock-table">' +
+            '<thead><tr><th>Method</th><th>Endpoint</th><th>Response Preview</th><th>Actions</th></tr></thead><tbody>';
+        _loadedMocks.forEach(function(e, idx) {
+            var preview = JSON.stringify(e.body);
+            if (preview.length > 100) preview = preview.substring(0, 100) + '...';
+            html += '<tr id="mock-row-' + idx + '">' +
+                '<td><span class="method-badge method-' + e.method + '">' + e.method + '</span></td>' +
+                '<td style="font-family:var(--mono);font-size:0.82rem;">' + escapeHtml(e.endpoint) + '</td>' +
+                '<td class="mock-preview">' + escapeHtml(preview) + '</td>' +
+                '<td style="white-space:nowrap;">' +
+                    '<button class="btn btn-outline btn-sm" onclick="viewMockByIdx(' + idx + ')" title="View full response">View</button> ' +
+                    '<button class="btn btn-outline btn-sm" onclick="editMockByIdx(' + idx + ')" title="Load into editor">Edit</button> ' +
+                    '<button class="btn btn-outline btn-sm" id="del-btn-' + idx + '" onclick="confirmDelete(' + idx + ')" title="Delete this mock" style="color:var(--red);border-color:var(--red);">Delete</button>' +
+                '</td>' +
+            '</tr>';
+        });
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    // --- View ---
+    function viewMockByIdx(idx) {
+        var m = _loadedMocks[idx];
+        if (!m) return;
+        openViewModal(m.endpoint, m.method, m.body);
+    }
+
+    // --- Edit ---
+    function editMockByIdx(idx) {
+        var m = _loadedMocks[idx];
+        if (!m) return;
+        editMock(m.endpoint, m.method, m.body);
+    }
+
+    function editMock(endpoint, method, bodyObj) {
+        // Fill the form fields — including proxy identifier from the mocks panel
+        var sourceId = document.getElementById('mocks_proxy_id').value.trim();
+        if (sourceId) document.getElementById('mock_proxy_id').value = sourceId;
+        document.getElementById('mock_endpoint').value = endpoint;
+        document.getElementById('mock_method').value = method;
+
+        // Load into raw JSON tab
+        switchTab('raw');
+        document.getElementById('mock_json_raw').value = JSON.stringify(bodyObj, null, 2);
+
+        // Also load into visual builder (clear existing rows first)
+        var rowsContainer = document.getElementById('mockRows');
+        rowsContainer.innerHTML = '';
+        loadIntoVisualBuilder(bodyObj);
+        updatePreview();
+
+        // Scroll to form
+        window.scrollTo({ top: document.getElementById('mock_proxy_id').offsetTop - 80, behavior: 'smooth' });
+        showToast('Mock loaded into editor — modify and click "Create Mock" to save', 'success');
+    }
+
+    // --- Delete with confirmation ---
+    function confirmDelete(idx) {
+        var btn = document.getElementById('del-btn-' + idx);
+        if (!btn) return;
+        var m = _loadedMocks[idx];
+
+        // Replace button with confirm/cancel
+        var td = btn.parentElement;
+        var original = td.innerHTML;
+        td.innerHTML =
+            '<div class="confirm-delete">' +
+                '<span>Delete?</span>' +
+                '<button class="btn btn-red btn-sm" onclick="doDelete(' + idx + ')">Yes</button> ' +
+                '<button class="btn btn-outline btn-sm" onclick="cancelDelete(' + idx + ',this)">No</button>' +
+            '</div>';
+
+        // Store original HTML for cancel
+        td.dataset.originalHtml = original;
+    }
+
+    function cancelDelete(idx, btn) {
+        var td = btn.closest('td');
+        if (td && td.dataset.originalHtml) {
+            td.innerHTML = td.dataset.originalHtml;
+        }
+    }
+
+    async function doDelete(idx) {
+        var m = _loadedMocks[idx];
+        if (!m) return;
+        var proxyId = document.getElementById('mocks_proxy_id').value.trim();
+
+        try {
+            await api('/proxy/mock/delete/', 'POST', {
+                proxy_identifier: proxyId,
+                end_point: m.endpoint,
+                method: m.method
+            });
+            showToast(m.method + ' ' + m.endpoint + ' deleted', 'success');
+            // Remove row with animation
+            var row = document.getElementById('mock-row-' + idx);
+            if (row) {
+                row.style.transition = 'opacity 0.3s';
+                row.style.opacity = '0';
+                setTimeout(function() { row.remove(); }, 300);
+            }
+            // Remove from local array
+            _loadedMocks[idx] = null;
+
+            // If all deleted, show empty state
+            if (_loadedMocks.every(function(m) { return m === null; })) {
+                setTimeout(function() {
+                    document.getElementById('mocksContainer').innerHTML =
+                        '<div class="empty-state"><p>No mocks configured for this proxy.</p></div>';
+                }, 350);
+            }
+        } catch (e) {
+            showToast((e.data && e.data.error) || 'Delete failed', 'error');
+            // Restore the row buttons
+            cancelDelete(idx, document.querySelector('#mock-row-' + idx + ' td:last-child button'));
+        }
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+flask
+requests
+pycryptodome
+shortuuid
+python-dotenv
+simpleeval

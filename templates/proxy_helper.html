@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PED Tools | API Documentation</title>
+    <style>
+        :root {
+            --blue: #007bff;
+            --blue-dark: #0056b3;
+            --blue-light: #e8f0fe;
+            --green: #28a745;
+            --red: #dc3545;
+            --orange: #fd7e14;
+            --gray-bg: #f0f2f5;
+            --gray-border: #d1d5db;
+            --gray-text: #555;
+            --white: #fff;
+            --shadow: 0 2px 8px rgba(0,0,0,0.08);
+            --radius: 8px;
+            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            --mono: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+        }
+        *, *::before, *::after { box-sizing: border-box; }
+        body { font-family: var(--font); margin: 0; background: var(--gray-bg); color: #333; line-height: 1.6; }
+
+        /* --- Top nav --- */
+        .topbar {
+            background: var(--blue); color: var(--white); padding: 12px 24px;
+            display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+        }
+        .topbar h1 { margin: 0; font-size: 1.25rem; flex: 1; }
+        .topbar a {
+            color: var(--white); text-decoration: none; font-size: 0.9rem;
+            padding: 6px 14px; border: 1px solid rgba(255,255,255,0.4);
+            border-radius: var(--radius); transition: background 0.2s;
+        }
+        .topbar a:hover { background: rgba(255,255,255,0.15); }
+
+        /* --- Layout --- */
+        .page { max-width: 960px; margin: 0 auto; padding: 24px; }
+
+        /* --- Cards --- */
+        .card {
+            background: var(--white); border-radius: var(--radius);
+            box-shadow: var(--shadow); padding: 24px; margin-bottom: 20px;
+        }
+        .card h2 { margin: 0 0 12px; color: var(--blue); font-size: 1.15rem; }
+        .card h3 { margin: 16px 0 8px; font-size: 1rem; }
+        .card p { margin: 0 0 10px; color: var(--gray-text); }
+        .card ul { margin: 0 0 10px 20px; }
+        .card li { margin-bottom: 6px; }
+
+        /* --- Inline code --- */
+        code {
+            background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 3px;
+            font-family: var(--mono); font-size: 0.88em; color: #c7254e;
+        }
+
+        /* --- Code blocks --- */
+        pre {
+            background: #1e1e2e; color: #cdd6f4; padding: 16px;
+            border-radius: var(--radius); overflow-x: auto;
+            font-family: var(--mono); font-size: 0.82rem; line-height: 1.5;
+            margin: 10px 0; position: relative;
+        }
+        pre .copy-btn {
+            position: absolute; top: 8px; right: 8px;
+            background: rgba(255,255,255,0.1); color: #cdd6f4;
+            border: 1px solid rgba(255,255,255,0.2); padding: 3px 10px;
+            border-radius: 4px; cursor: pointer; font-size: 0.72rem;
+        }
+        pre .copy-btn:hover { background: rgba(255,255,255,0.2); }
+
+        /* --- Accordion --- */
+        .accordion {
+            background: var(--white); border-radius: var(--radius);
+            box-shadow: var(--shadow); margin-bottom: 12px; overflow: hidden;
+        }
+        .accordion-header {
+            padding: 14px 20px; cursor: pointer; font-weight: 600;
+            display: flex; align-items: center; gap: 10px;
+            transition: background 0.2s; user-select: none;
+        }
+        .accordion-header:hover { background: var(--blue-light); }
+        .accordion-header .arrow {
+            transition: transform 0.3s; font-size: 0.8rem; color: var(--blue);
+        }
+        .accordion.open .accordion-header .arrow { transform: rotate(90deg); }
+        .accordion-body { display: none; padding: 0 20px 20px; }
+        .accordion.open .accordion-body { display: block; }
+
+        /* --- Method badge --- */
+        .method-badge {
+            display: inline-block; padding: 3px 10px; border-radius: 4px;
+            font-size: 0.78rem; font-weight: 700; color: var(--white);
+            font-family: var(--mono);
+        }
+        .method-GET { background: var(--green); }
+        .method-POST { background: var(--blue); }
+
+        /* --- Columns --- */
+        .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
+        @media (max-width: 700px) { .cols { grid-template-columns: 1fr; } }
+
+        /* --- Note box --- */
+        .note {
+            background: var(--blue-light); border-left: 4px solid var(--blue);
+            padding: 12px 16px; border-radius: 0 var(--radius) var(--radius) 0;
+            font-size: 0.85rem; margin: 14px 0; color: #004080;
+        }
+
+        /* --- Table --- */
+        .ref-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin: 10px 0; }
+        .ref-table th {
+            text-align: left; padding: 8px 10px; background: var(--blue-light);
+            color: var(--blue-dark); border-bottom: 2px solid var(--blue);
+        }
+        .ref-table td { padding: 8px 10px; border-bottom: 1px solid #eee; vertical-align: top; }
+        .ref-table code { font-size: 0.82em; }
+
+        /* --- TOC --- */
+        .toc { list-style: none; padding: 0; margin: 0; }
+        .toc li { margin-bottom: 6px; }
+        .toc a { color: var(--blue); text-decoration: none; font-size: 0.9rem; }
+        .toc a:hover { text-decoration: underline; }
+
+        /* --- Flow diagram --- */
+        .flow {
+            display: flex; align-items: center; gap: 0; flex-wrap: wrap;
+            margin: 16px 0; font-size: 0.85rem;
+        }
+        .flow-step {
+            background: var(--blue-light); padding: 8px 14px; border-radius: 6px;
+            font-weight: 600; color: var(--blue-dark); white-space: nowrap;
+        }
+        .flow-arrow { padding: 0 8px; color: var(--gray-text); font-size: 1.2rem; }
+        .flow-step.alt { background: #e8ffe8; color: #1a7a1a; }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>API Documentation</h1>
+        <a href="/proxy/">Mock Builder</a>
+        <a href="/">Home</a>
+    </div>
+
+    <div class="page">
+        <!-- Overview -->
+        <div class="card">
+            <h2>Proxy Server &amp; API Mocker</h2>
+            <p>
+                A lightweight proxy that sits between your client and a real API.
+                You can <strong>mock any endpoint</strong> to return custom responses, or let
+                unmatched requests <strong>pass through</strong> to the real API.
+            </p>
+
+            <h3>How It Works</h3>
+            <div class="flow">
+                <div class="flow-step">Your Client</div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step">Proxy Server</div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step alt">Mock exists? Return mock</div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step">No mock? Forward to real API</div>
+            </div>
+
+            <h3>Quick Start</h3>
+            <ol>
+                <li><strong>Register</strong> a proxy with your API's base URL</li>
+                <li><strong>Create mocks</strong> for the endpoints you want to simulate</li>
+                <li><strong>Point your client</strong> to <code>/proxy/&lt;identifier&gt;/</code> instead of the real API</li>
+            </ol>
+
+            <h3>Endpoints</h3>
+            <ul class="toc">
+                <li><a href="#ep-create">POST /proxy/create/</a> &mdash; Register a new proxy</li>
+                <li><a href="#ep-mock-create">POST /proxy/mock/create/</a> &mdash; Create or update a mock</li>
+                <li><a href="#ep-get">GET /proxy/get/&lt;id&gt;/</a> &mdash; View proxy config &amp; mocks</li>
+                <li><a href="#ep-proxy">ANY /proxy/&lt;id&gt;/&lt;path&gt;</a> &mdash; Proxy or mock a request</li>
+                <li><a href="#placeholders">Dynamic Placeholders Reference</a></li>
+                <li><a href="#patterns">URL Pattern Matching</a></li>
+            </ul>
+        </div>
+
+        <!-- POST /proxy/create/ -->
+        <div class="accordion" id="ep-create">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+                <span class="arrow">&#9654;</span>
+                <span class="method-badge method-POST">POST</span>
+                <span>/proxy/create/</span>
+            </div>
+            <div class="accordion-body">
+                <p>Register a new proxy server instance.</p>
+                <table class="ref-table">
+                    <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+                    <tr><td><code>api_domain</code></td><td>string</td><td>Yes</td><td>Base URL of the real API</td></tr>
+                    <tr><td><code>identifier</code></td><td>string</td><td>No</td><td>Custom ID (auto-generated if omitted)</td></tr>
+                </table>
+                <div class="cols">
+                    <div>
+                        <h3>Request</h3>
+                        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>{
+  "api_domain": "https://api.example.com",
+  "identifier": "payments-v2"
+}</pre>
+                    </div>
+                    <div>
+                        <h3>Response</h3>
+                        <pre>{
+  "identifier": "payments-v2",
+  "message": "api mocker created successfully",
+  "old_mocks": null
+}</pre>
+                    </div>
+                </div>
+                <h3>cURL</h3>
+                <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>curl -X POST http://localhost:8000/proxy/create/ \
+  -H 'Content-Type: application/json' \
+  -d '{"api_domain": "https://api.example.com", "identifier": "payments-v2"}'</pre>
+            </div>
+        </div>
+
+        <!-- POST /proxy/mock/create/ -->
+        <div class="accordion" id="ep-mock-create">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+                <span class="arrow">&#9654;</span>
+                <span class="method-badge method-POST">POST</span>
+                <span>/proxy/mock/create/</span>
+            </div>
+            <div class="accordion-body">
+                <p>Create or update a mock response for a specific endpoint and HTTP method.</p>
+                <table class="ref-table">
+                    <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+                    <tr><td><code>proxy_identifier</code></td><td>string</td><td>Yes</td><td>The proxy to attach this mock to</td></tr>
+                    <tr><td><code>end_point</code></td><td>string</td><td>Yes</td><td>Path or URL to mock (supports <a href="#patterns">patterns</a>)</td></tr>
+                    <tr><td><code>method</code></td><td>string</td><td>Yes</td><td>GET, POST, PUT, PATCH, or DELETE</td></tr>
+                    <tr><td><code>mock</code></td><td>object</td><td>Yes</td><td>Response JSON (supports <a href="#placeholders">placeholders</a>)</td></tr>
+                </table>
+                <div class="cols">
+                    <div>
+                        <h3>Request</h3>
+                        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>{
+  "proxy_identifier": "payments-v2",
+  "end_point": "/orders/&lt;id&gt;/status",
+  "method": "GET",
+  "mock": {
+    "order_id": "pathparamget(orders)",
+    "status": "confirmed",
+    "tracking": "upper(8)",
+    "amount": "jsonget(total)"
+  }
+}</pre>
+                    </div>
+                    <div>
+                        <h3>Response</h3>
+                        <pre>{
+  "proxy_identifier": "payments-v2",
+  "end_point": "/orders/&lt;id&gt;/status",
+  "method": "GET",
+  "new_mock": { ... },
+  "old_mock": null
+}</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- GET /proxy/get/<identifier>/ -->
+        <div class="accordion" id="ep-get">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+                <span class="arrow">&#9654;</span>
+                <span class="method-badge method-GET">GET</span>
+                <span>/proxy/get/&lt;identifier&gt;/</span>
+            </div>
+            <div class="accordion-body">
+                <p>Retrieve the configuration and all mocks for a proxy.</p>
+                <div class="cols">
+                    <div>
+                        <h3>cURL</h3>
+                        <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>curl http://localhost:8000/proxy/get/payments-v2/</pre>
+                    </div>
+                    <div>
+                        <h3>Response</h3>
+                        <pre>{
+  "api_domain": "https://api.example.com",
+  "mocked_requests": {
+    "/orders/&lt;id&gt;/status": {
+      "GET": {
+        "order_id": "pathparamget(orders)",
+        "status": "confirmed"
+      }
+    }
+  }
+}</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Proxy requests -->
+        <div class="accordion" id="ep-proxy">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+                <span class="arrow">&#9654;</span>
+                <span style="font-weight:700;font-family:var(--mono);font-size:0.85rem;color:var(--gray-text);">ANY</span>
+                <span>/proxy/&lt;identifier&gt;/&lt;endpoint&gt;</span>
+            </div>
+            <div class="accordion-body">
+                <p>
+                    The main proxy endpoint. Supports GET, POST, PUT, PATCH, DELETE.
+                </p>
+                <div class="flow">
+                    <div class="flow-step">Request hits proxy</div>
+                    <div class="flow-arrow">&rarr;</div>
+                    <div class="flow-step alt">Check mocks (exact &rarr; prefixed &rarr; pattern)</div>
+                    <div class="flow-arrow">&rarr;</div>
+                    <div class="flow-step">Match found: return mock with placeholders resolved</div>
+                </div>
+                <div class="flow">
+                    <div class="flow-step">No match</div>
+                    <div class="flow-arrow">&rarr;</div>
+                    <div class="flow-step">Forward to api_domain + endpoint</div>
+                    <div class="flow-arrow">&rarr;</div>
+                    <div class="flow-step alt">Return real API response</div>
+                </div>
+                <h3>Example</h3>
+                <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button># If mock exists for /orders/123/status GET, returns mock.
+# Otherwise forwards to https://api.example.com/orders/123/status
+curl http://localhost:8000/proxy/payments-v2/orders/123/status</pre>
+            </div>
+        </div>
+
+        <!-- Placeholders Reference -->
+        <div class="card" id="placeholders">
+            <h2>Dynamic Placeholders</h2>
+            <p>Use these in mock response values. They are resolved at request time.</p>
+            <table class="ref-table">
+                <tr><th>Placeholder</th><th>Description</th><th>Example Value</th><th>Output</th></tr>
+                <tr>
+                    <td><code>headerget(Name)</code></td>
+                    <td>Value of request header</td>
+                    <td><code>headerget(Authorization)</code></td>
+                    <td>Bearer xyz...</td>
+                </tr>
+                <tr>
+                    <td><code>jsonget(key)</code></td>
+                    <td>Value from JSON request body</td>
+                    <td><code>jsonget(user_id)</code></td>
+                    <td>12345</td>
+                </tr>
+                <tr>
+                    <td><code>paramget(name)</code></td>
+                    <td>Value of query parameter</td>
+                    <td><code>paramget(page)</code></td>
+                    <td>2</td>
+                </tr>
+                <tr>
+                    <td><code>pathparamget(prefix)</code></td>
+                    <td>URL segment after prefix</td>
+                    <td><code>pathparamget(orders)</code></td>
+                    <td>789 <em>(from /orders/789/...)</em></td>
+                </tr>
+                <tr>
+                    <td><code>upper(n)</code></td>
+                    <td>Random uppercase letters</td>
+                    <td><code>upper(6)</code></td>
+                    <td>KFMXQP</td>
+                </tr>
+                <tr>
+                    <td><code>lower(n)</code></td>
+                    <td>Random lowercase letters</td>
+                    <td><code>lower(8)</code></td>
+                    <td>xqrtmnbl</td>
+                </tr>
+                <tr>
+                    <td><code>chars(n)</code></td>
+                    <td>Random mixed-case letters</td>
+                    <td><code>chars(5)</code></td>
+                    <td>kBmQz</td>
+                </tr>
+                <tr>
+                    <td><code>digit(n)</code></td>
+                    <td>Random digits</td>
+                    <td><code>digit(4)</code></td>
+                    <td>8294</td>
+                </tr>
+                <tr>
+                    <td><code>alnum([x,y,...])</code></td>
+                    <td>Alternating letters + digits</td>
+                    <td><code>alnum([3,2,4,1])</code></td>
+                    <td>aBc12dEfG3</td>
+                </tr>
+                <tr>
+                    <td><code>snippet(expr)</code></td>
+                    <td>Evaluate safe Python expression</td>
+                    <td><code>snippet(len("hello"))</code></td>
+                    <td>5</td>
+                </tr>
+            </table>
+
+            <div class="note">
+                <strong>snippet()</strong> runs in a sandboxed evaluator. Only safe builtins are available
+                (abs, int, str, len, min, max, sorted, range, etc.). No imports, file I/O, or exec allowed.
+            </div>
+        </div>
+
+        <!-- URL Patterns -->
+        <div class="card" id="patterns">
+            <h2>URL Pattern Matching</h2>
+            <p>When creating mocks, you can use several endpoint formats:</p>
+            <table class="ref-table">
+                <tr><th>Format</th><th>Example</th><th>Matches</th></tr>
+                <tr>
+                    <td>Exact path</td>
+                    <td><code>/users/123</code></td>
+                    <td>Only <code>/users/123</code></td>
+                </tr>
+                <tr>
+                    <td>Dynamic segment</td>
+                    <td><code>/users/&lt;id&gt;/orders</code></td>
+                    <td><code>/users/456/orders</code>, <code>/users/abc/orders</code></td>
+                </tr>
+                <tr>
+                    <td>Full URL</td>
+                    <td><code>https://api.example.com/users/123</code></td>
+                    <td>When the constructed URL matches exactly</td>
+                </tr>
+            </table>
+            <p>
+                <strong>Resolution order:</strong> exact path &rarr; path with leading <code>/</code> &rarr;
+                full URL &rarr; pattern match. First match wins.
+            </p>
+
+            <h3>pathparamget with indexed prefix</h3>
+            <p>
+                If a URL has the same prefix repeated (e.g. <code>/api/items/1/items/2</code>), use
+                <code>pathparamget(items_2)</code> to get the second occurrence.
+            </p>
+        </div>
+    </div>
+
+    <script>
+    function toggleAccordion(header) {
+        header.parentElement.classList.toggle('open');
+    }
+
+    function copyBlock(btn) {
+        const pre = btn.parentElement;
+        const text = pre.textContent.replace('Copy', '').trim();
+        navigator.clipboard.writeText(text);
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy', 1500);
+    }
+
+    // Open accordion if linked via hash
+    if (window.location.hash) {
+        const el = document.querySelector(window.location.hash);
+        if (el && el.classList.contains('accordion')) {
+            el.classList.add('open');
+            setTimeout(() => el.scrollIntoView({ behavior: 'smooth' }), 100);
+        }
+    }
+    </script>
+</body>
+</html>

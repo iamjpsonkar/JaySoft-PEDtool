@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PED Tools</title>
+    <style>
+        :root {
+            --blue: #007bff;
+            --blue-dark: #0056b3;
+            --blue-light: #e8f0fe;
+            --green: #28a745;
+            --green-dark: #218838;
+            --red: #dc3545;
+            --gray-bg: #f0f2f5;
+            --gray-border: #d1d5db;
+            --gray-text: #555;
+            --white: #fff;
+            --shadow: 0 2px 8px rgba(0,0,0,0.08);
+            --radius: 8px;
+            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            --mono: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+        }
+        *, *::before, *::after { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; }
+        body { font-family: var(--font); background: var(--gray-bg); color: #333; display: flex; flex-direction: column; }
+
+        /* --- Top nav --- */
+        .topbar {
+            background: var(--blue); color: var(--white); padding: 10px 24px;
+            display: flex; align-items: center; gap: 16px; flex-wrap: wrap; flex-shrink: 0;
+        }
+        .topbar h1 { margin: 0; font-size: 1.2rem; flex: 1; }
+        .topbar a {
+            color: var(--white); text-decoration: none; font-size: 0.85rem;
+            padding: 6px 14px; border: 1px solid rgba(255,255,255,0.4);
+            border-radius: var(--radius); transition: background 0.2s;
+        }
+        .topbar a:hover { background: rgba(255,255,255,0.15); }
+
+        /* --- Toolbar --- */
+        .toolbar {
+            background: var(--white); border-bottom: 1px solid var(--gray-border);
+            padding: 10px 24px; display: flex; align-items: center; gap: 12px;
+            flex-wrap: wrap; flex-shrink: 0;
+        }
+        .toolbar-group {
+            display: flex; align-items: center; gap: 8px;
+            padding: 6px 12px; border: 1px solid var(--gray-border);
+            border-radius: var(--radius); background: #fafafa;
+        }
+        .toolbar label { font-size: 0.82rem; font-weight: 600; margin: 0; white-space: nowrap; }
+        .toolbar input[type="text"] {
+            padding: 5px 10px; border: 1px solid var(--gray-border); border-radius: 5px;
+            font-size: 0.85rem; width: 140px; font-family: var(--mono);
+        }
+        .toolbar input[type="text"]:focus { outline: none; border-color: var(--blue); }
+        .toolbar input[type="checkbox"] { margin: 0; cursor: pointer; width: 16px; height: 16px; accent-color: var(--blue); }
+        .btn {
+            padding: 6px 16px; border: none; border-radius: 6px; font-size: 0.85rem;
+            font-weight: 600; cursor: pointer; transition: background 0.2s, transform 0.1s;
+            color: var(--white);
+        }
+        .btn:active { transform: scale(0.97); }
+        .btn-blue { background: var(--blue); }
+        .btn-blue:hover { background: var(--blue-dark); }
+        .btn-green { background: var(--green); }
+        .btn-green:hover { background: var(--green-dark); }
+        .btn-outline {
+            background: transparent; border: 1px solid var(--gray-border);
+            color: var(--gray-text);
+        }
+        .btn-outline:hover { background: #f5f5f5; }
+
+        /* --- Editor area --- */
+        .editors {
+            flex: 1; display: flex; overflow: hidden; min-height: 0;
+        }
+        .editor-pane {
+            flex: 1; display: flex; flex-direction: column; overflow: hidden;
+            border-right: 1px solid var(--gray-border);
+        }
+        .editor-pane:last-child { border-right: none; }
+        .pane-header {
+            padding: 8px 16px; background: #f8f9fa; border-bottom: 1px solid var(--gray-border);
+            font-size: 0.8rem; font-weight: 600; color: var(--gray-text);
+            display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+        }
+        .pane-header .pane-actions { display: flex; gap: 6px; }
+        .pane-header .btn-sm {
+            padding: 3px 10px; font-size: 0.75rem; border-radius: 4px;
+            cursor: pointer; border: 1px solid var(--gray-border);
+            background: var(--white); color: var(--gray-text); transition: all 0.2s;
+        }
+        .pane-header .btn-sm:hover { background: var(--blue-light); color: var(--blue); border-color: var(--blue); }
+        textarea.editor {
+            flex: 1; width: 100%; border: none; padding: 16px; resize: none;
+            font-family: var(--mono); font-size: 0.85rem; line-height: 1.6;
+            background: var(--white); color: #333; outline: none;
+        }
+        textarea.editor::placeholder { color: #aaa; }
+
+        /* --- Toast --- */
+        .toast {
+            position: fixed; bottom: 24px; right: 24px; padding: 10px 18px;
+            border-radius: var(--radius); color: var(--white); font-weight: 600;
+            font-size: 0.85rem; z-index: 1000; opacity: 0;
+            transition: opacity 0.3s, transform 0.3s; transform: translateY(10px);
+        }
+        .toast.visible { opacity: 1; transform: translateY(0); }
+        .toast-success { background: var(--green); }
+        .toast-error { background: var(--red); }
+
+        /* --- Status bar --- */
+        .statusbar {
+            background: #f8f9fa; border-top: 1px solid var(--gray-border);
+            padding: 4px 24px; font-size: 0.75rem; color: var(--gray-text);
+            display: flex; gap: 20px; flex-shrink: 0;
+        }
+
+        /* responsive */
+        @media (max-width: 700px) {
+            .editors { flex-direction: column; }
+            .editor-pane { border-right: none; border-bottom: 1px solid var(--gray-border); }
+            .toolbar { gap: 8px; }
+            .toolbar input[type="text"] { width: 100px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>PED Tools</h1>
+        <a href="/proxy/">Proxy Server</a>
+        <a href="/proxy/helper">Docs</a>
+    </div>
+
+    <div class="toolbar">
+        <!-- Prettify group -->
+        <div class="toolbar-group">
+            <input type="checkbox" id="processEscape" />
+            <label for="processEscape">Process Escapes</label>
+            <button class="btn btn-blue" onclick="prettify()">Prettify</button>
+        </div>
+
+        <!-- Encrypt/Decrypt group -->
+        <div class="toolbar-group">
+            <label for="encIv">IV:</label>
+            <input type="text" id="encIv" placeholder="Enter enc_iv" />
+            <label for="secret">Secret:</label>
+            <input type="text" id="secret" placeholder="Enter secret" />
+            <button class="btn btn-green" onclick="encryptData()">Encrypt</button>
+            <button class="btn btn-blue" onclick="decryptData()">Decrypt</button>
+        </div>
+    </div>
+
+    <div class="editors">
+        <!-- Input pane -->
+        <div class="editor-pane">
+            <div class="pane-header">
+                <span>Input</span>
+                <div class="pane-actions">
+                    <button class="btn-sm" onclick="formatInput()">Format</button>
+                    <button class="btn-sm" onclick="clearInput()">Clear</button>
+                    <button class="btn-sm" onclick="pasteInput()">Paste</button>
+                </div>
+            </div>
+            <textarea class="editor" id="inputEditor" placeholder="Paste JSON, encrypted data, or raw text here..."></textarea>
+        </div>
+
+        <!-- Output pane -->
+        <div class="editor-pane">
+            <div class="pane-header">
+                <span>Output</span>
+                <div class="pane-actions">
+                    <button class="btn-sm" onclick="copyOutput()">Copy</button>
+                    <button class="btn-sm" onclick="moveToInput()">&#8592; Use as Input</button>
+                    <button class="btn-sm" onclick="clearOutput()">Clear</button>
+                </div>
+            </div>
+            <textarea class="editor" id="outputEditor" placeholder="Results appear here..." readonly></textarea>
+        </div>
+    </div>
+
+    <div class="statusbar">
+        <span id="inputStatus">Input: 0 chars</span>
+        <span id="outputStatus">Output: 0 chars</span>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+    const inputEl = document.getElementById('inputEditor');
+    const outputEl = document.getElementById('outputEditor');
+
+    /* --- Status bar updates --- */
+    inputEl.addEventListener('input', () => {
+        document.getElementById('inputStatus').textContent = 'Input: ' + inputEl.value.length + ' chars';
+    });
+
+    /* --- Toast --- */
+    function showToast(msg, type) {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.className = 'toast toast-' + type + ' visible';
+        setTimeout(() => t.classList.remove('visible'), 3000);
+    }
+
+    function setOutput(text) {
+        outputEl.value = text;
+        document.getElementById('outputStatus').textContent = 'Output: ' + text.length + ' chars';
+    }
+
+    /* --- API helper --- */
+    async function post(url, body) {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        return res.json();
+    }
+
+    /* --- Pane actions --- */
+    function formatInput() {
+        try {
+            const parsed = JSON.parse(inputEl.value);
+            inputEl.value = JSON.stringify(parsed, null, 2);
+            showToast('Formatted', 'success');
+        } catch {
+            showToast('Not valid JSON', 'error');
+        }
+    }
+
+    function clearInput() { inputEl.value = ''; inputEl.dispatchEvent(new Event('input')); }
+    function clearOutput() { setOutput(''); }
+
+    async function pasteInput() {
+        try {
+            const text = await navigator.clipboard.readText();
+            inputEl.value = text;
+            inputEl.dispatchEvent(new Event('input'));
+            showToast('Pasted from clipboard', 'success');
+        } catch {
+            showToast('Clipboard access denied', 'error');
+        }
+    }
+
+    function copyOutput() {
+        if (!outputEl.value) { showToast('Nothing to copy', 'error'); return; }
+        navigator.clipboard.writeText(outputEl.value);
+        showToast('Copied to clipboard', 'success');
+    }
+
+    function moveToInput() {
+        inputEl.value = outputEl.value;
+        inputEl.dispatchEvent(new Event('input'));
+        showToast('Moved to input', 'success');
+    }
+
+    /* --- Prettify --- */
+    async function prettify() {
+        const data = inputEl.value.trim();
+        if (!data) { showToast('Input is empty', 'error'); return; }
+        try {
+            const res = await post('/ped/prettify', {
+                data: data,
+                processEscape: document.getElementById('processEscape').checked
+            });
+            if (res.prettified) {
+                setOutput(res.prettified);
+                showToast('Prettified', 'success');
+            } else {
+                setOutput('Error: ' + (res.error || 'Unknown error'));
+                showToast('Prettify failed', 'error');
+            }
+        } catch (e) {
+            showToast('Request failed', 'error');
+        }
+    }
+
+    /* --- Encrypt --- */
+    async function encryptData() {
+        const data = inputEl.value.trim();
+        const encIv = document.getElementById('encIv').value.trim();
+        const secret = document.getElementById('secret').value.trim();
+
+        if (!encIv || !secret) { showToast('Provide both IV and Secret', 'error'); return; }
+        if (!data) { showToast('Input is empty', 'error'); return; }
+
+        try {
+            const res = await post('/ped/encrypt', { enc_iv: encIv, secret: secret, data: data });
+            if (res.encrypted) {
+                setOutput(res.encrypted);
+                showToast('Encrypted', 'success');
+            } else {
+                setOutput('Error: ' + (res.error || 'Unknown error'));
+                showToast('Encryption failed', 'error');
+            }
+        } catch (e) {
+            showToast('Request failed', 'error');
+        }
+    }
+
+    /* --- Decrypt --- */
+    async function decryptData() {
+        const encryptedData = inputEl.value.trim();
+        const encIv = document.getElementById('encIv').value.trim();
+        const secret = document.getElementById('secret').value.trim();
+
+        if (!encIv || !secret) { showToast('Provide both IV and Secret', 'error'); return; }
+        if (!encryptedData) { showToast('Input is empty', 'error'); return; }
+
+        try {
+            const res = await post('/ped/decrypt', { enc_iv: encIv, secret: secret, encryptedData: encryptedData });
+            if (res.decrypted) {
+                // Try to format the decrypted JSON
+                try {
+                    const parsed = JSON.parse(res.decrypted);
+                    setOutput(JSON.stringify(parsed, null, 2));
+                } catch {
+                    setOutput(res.decrypted);
+                }
+                showToast('Decrypted', 'success');
+            } else {
+                setOutput('Error: ' + (res.error || 'Unknown error'));
+                showToast('Decryption failed', 'error');
+            }
+        } catch (e) {
+            showToast('Request failed', 'error');
+        }
+    }
+
+    /* --- Keyboard shortcuts --- */
+    document.addEventListener('keydown', (e) => {
+        // Ctrl/Cmd + Enter = Prettify
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            e.preventDefault();
+            prettify();
+        }
+        // Ctrl/Cmd + Shift + E = Encrypt
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'E') {
+            e.preventDefault();
+            encryptData();
+        }
+        // Ctrl/Cmd + Shift + D = Decrypt
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'D') {
+            e.preventDefault();
+            decryptData();
+        }
+    });
+    </script>
+</body>
+</html>
