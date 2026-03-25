@@ -22,7 +22,7 @@ load_dotenv(os.path.join(_BASE_DIR, ".env"))
 
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
-from flask import Flask, g, jsonify, render_template, request
+from flask import Flask, Response, g, jsonify, render_template, request
 from simpleeval import EvalWithCompoundTypes
 
 import requests as http_requests
@@ -189,15 +189,22 @@ def db_upsert_mock(
     return old_mock
 
 
-def db_delete_mock(proxy_id: str, endpoint: str, method: str) -> bool:
-    """Delete a specific mock. Returns True if a row was deleted."""
+def db_delete_mock(proxy_id: str, endpoint: str, method: str) -> dict | None:
+    """Delete a specific mock. Returns the deleted mock data or None."""
     db = _get_db()
-    cursor = db.execute(
+    old_row = db.execute(
+        "SELECT response FROM mocks WHERE proxy_id = ? AND endpoint = ? AND method = ?",
+        (proxy_id, endpoint, method),
+    ).fetchone()
+    if not old_row:
+        return None
+    deleted_mock = json.loads(old_row["response"])
+    db.execute(
         "DELETE FROM mocks WHERE proxy_id = ? AND endpoint = ? AND method = ?",
         (proxy_id, endpoint, method),
     )
     db.commit()
-    return cursor.rowcount > 0
+    return deleted_mock
 
 
 def db_delete_proxy(identifier: str) -> bool:
@@ -413,6 +420,162 @@ def match_path(mock_endpoints: dict, actual_path: str) -> str | None:
         if path_to_regex(pattern).match(actual_path):
             return pattern
     return None
+
+
+# ---------------------------------------------------------------------------
+# API class — multi-content-type forwarding with curl logging
+# ---------------------------------------------------------------------------
+
+FORWARD_TIMEOUT = int(os.environ.get("PED_FORWARD_TIMEOUT", "30"))
+
+
+class API:
+    """Captures a Flask request and forwards it to a target URL,
+    handling JSON, form-encoded, multipart, and raw body types.
+    Logs the equivalent curl command for debugging."""
+
+    def __init__(self, flask_request, api_url):
+        self.method = flask_request.method
+        self.url = api_url
+        self.headers = {
+            k: v for k, v in flask_request.headers.items()
+            if k.lower() not in ('host', 'content-length', 'transfer-encoding')
+        }
+        self.params = flask_request.args.to_dict(flat=False)
+        self.params = {
+            k: v[0] if len(v) == 1 else v
+            for k, v in self.params.items()
+        }
+        self.content_type = flask_request.content_type or ''
+        self.body = self._parse_body(flask_request)
+
+    def _parse_body(self, flask_request):
+        raw = flask_request.get_data()
+        if not raw:
+            return None
+        if 'application/json' in self.content_type:
+            return {'json': flask_request.json or {}}
+        if 'application/x-www-form-urlencoded' in self.content_type:
+            return {'data': flask_request.form.to_dict()}
+        if 'multipart/form-data' in self.content_type:
+            files = {}
+            for k, f in flask_request.files.items():
+                files[k] = (f.filename, f.stream, f.content_type)
+            return {'files': files, 'data': flask_request.form.to_dict()}
+        return {'data': raw, 'headers': {**self.headers, 'Content-Type': self.content_type}}
+
+    def _to_curl(self):
+        parts = [f"curl -X {self.method}"]
+        url = self.url
+        if self.params:
+            qs = '&'.join(
+                f"{k}={v}" if isinstance(v, str) else '&'.join(f"{k}={i}" for i in v)
+                for k, v in self.params.items()
+            )
+            url += ('&' if '?' in url else '?') + qs
+        parts.append(f"'{url}'")
+        for k, v in self.headers.items():
+            parts.append(f"-H '{k}: {v}'")
+        if self.body:
+            if 'json' in self.body:
+                parts.append(f"-d '{json.dumps(self.body['json'])}'")
+            elif 'data' in self.body and isinstance(self.body['data'], dict):
+                parts.append(f"-d '{json.dumps(self.body['data'])}'")
+            elif 'data' in self.body and isinstance(self.body['data'], bytes):
+                parts.append(f"-d '<{len(self.body['data'])} bytes>'")
+            if 'files' in self.body:
+                for k in self.body['files']:
+                    parts.append(f"-F '{k}=@...'")
+        return ' \\\n  '.join(parts)
+
+    def forward(self):
+        kwargs = {
+            'headers': self.headers,
+            'params': self.params,
+            'timeout': FORWARD_TIMEOUT,
+            'allow_redirects': True,
+        }
+        if self.body:
+            kwargs.update(self.body)
+
+        logger.info("[FORWARD] %s %s content-type=%s", self.method, self.url, self.content_type)
+        logger.info("[CURL] %s", self._to_curl())
+        response = http_requests.request(self.method, self.url, **kwargs)
+        logger.info("[FORWARD] %s %s -> %s (%s bytes)", self.method, self.url, response.status_code, len(response.content))
+        return self._build_response(response)
+
+    def _build_response(self, response):
+        if not response.content:
+            return Response(status=response.status_code)
+
+        content_type = response.headers.get('Content-Type', 'text/plain')
+
+        if 'application/json' in content_type:
+            try:
+                return jsonify(response.json()), response.status_code
+            except ValueError:
+                pass
+
+        return Response(
+            response.content,
+            status=response.status_code,
+            content_type=content_type,
+        )
+
+
+# ---------------------------------------------------------------------------
+# MockMatcher — structured mock lookup with query string variants
+# ---------------------------------------------------------------------------
+
+
+class MockMatcher:
+    """Finds matching mock responses by trying multiple endpoint variants
+    (with/without leading slash, with/without query string, full URL)
+    and pattern matching for <param> placeholders."""
+
+    def __init__(self, mock_requests, endpoint, query_string, api_url):
+        self.mock_requests = mock_requests
+        self.variants = self._build_variants(endpoint, query_string, api_url)
+
+    def _build_variants(self, endpoint, query_string, api_url):
+        qs_suffix = '?' + query_string if query_string else ''
+        variants = [
+            endpoint + qs_suffix,
+            endpoint,
+            '/' + endpoint + qs_suffix,
+            '/' + endpoint,
+            api_url + qs_suffix,
+            api_url,
+        ]
+        seen = set()
+        deduped = []
+        for v in variants:
+            if v and v not in seen:
+                seen.add(v)
+                deduped.append(v)
+        return deduped
+
+    def find(self, method):
+        """Return (mock_key, mock_data) or (None, None)."""
+        # Exact match first
+        for variant in self.variants:
+            mock_methods = self.mock_requests.get(variant)
+            if mock_methods and mock_methods.get(method):
+                logger.info("[MOCK HIT] %s matched exact key '%s'", method, variant)
+                return variant, mock_methods[method]
+
+        # Pattern match (keys with <param> placeholders)
+        for mock_key, mock_methods in self.mock_requests.items():
+            if '<' not in mock_key:
+                continue
+            regex = path_to_regex(mock_key)
+            for variant in self.variants:
+                if regex.match(variant) and mock_methods.get(method):
+                    logger.info("[MOCK HIT] %s matched pattern key '%s' via '%s'", method, mock_key, variant)
+                    return mock_key, mock_methods[method]
+
+        logger.info("[MOCK MISS] %s no match found, tried: %s", method, self.variants)
+        return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -641,8 +804,11 @@ def decrypt_endpoint():
 @log_access
 @require_auth
 def prettify():
-    data_string = request.json.get("data", "")
-    process_escape = request.json.get("processEscape", False)
+    request_json = request.json
+    if not request_json:
+        return jsonify({"error": "Request body must be JSON"}), 400
+    data_string = request_json.get("data", "")
+    process_escape = request_json.get("processEscape", False)
 
     if process_escape:
         data_string = normalize_escape_sequences(data_string)
@@ -670,6 +836,8 @@ def prettify():
 @require_auth
 def create_proxy():
     request_data = request.json
+    if not request_data:
+        return jsonify({"error": "Request body must be JSON"}), 400
     api_domain = request_data.get("api_domain", "")
 
     if not _is_domain_allowed(api_domain):
@@ -692,6 +860,8 @@ def create_proxy():
 @require_auth
 def create_mock_proxy():
     request_data = request.json
+    if not request_data:
+        return jsonify({"error": "Request body must be JSON"}), 400
     proxy_identifier = request_data.get("proxy_identifier")
     end_point = request_data.get("end_point") or request_data.get("api_url")
     method = request_data.get("method")
@@ -723,6 +893,8 @@ def create_mock_proxy():
 @require_auth
 def delete_mock():
     request_data = request.json
+    if not request_data:
+        return jsonify({"error": "Request body must be JSON"}), 400
     proxy_id = request_data.get("proxy_identifier")
     endpoint = request_data.get("end_point")
     method = request_data.get("method")
@@ -730,11 +902,18 @@ def delete_mock():
     if not proxy_id or not endpoint or not method:
         return jsonify({"error": "proxy_identifier, end_point, and method are required"}), 400
 
-    deleted = db_delete_mock(proxy_id, endpoint, method)
-    if not deleted:
+    deleted_mock = db_delete_mock(proxy_id, endpoint, method)
+    if deleted_mock is None:
         return jsonify({"error": "Mock not found"}), 404
 
-    return jsonify({"message": "Mock deleted", "proxy_identifier": proxy_id, "end_point": endpoint, "method": method})
+    logger.info("[MOCK DELETE] %s %s %s", proxy_id, method, endpoint)
+
+    return jsonify({
+        "proxy_identifier": proxy_id,
+        "end_point": endpoint,
+        "method": method,
+        "deleted_mock": deleted_mock
+    })
 
 
 @app.route("/proxy/delete/<identifier>/", methods=["DELETE"])
@@ -777,7 +956,7 @@ def get_proxy(identifier):
 
 @app.route(
     "/proxy/<identifier>/<path:endpoint>",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
 )
 @log_access
 @require_auth
@@ -787,11 +966,12 @@ def proxy_request(identifier, endpoint):
         if api_domain is None:
             return jsonify({"error": f"Proxy '{identifier}' not found"}), 404
 
-        api_url = f"{api_domain}/{endpoint}"
+        api_url = f"{api_domain.rstrip('/')}/{endpoint}"
         method = request.method
-        mock_requests = db_get_mocks_for_proxy(identifier)
+        query_string = request.query_string.decode('utf-8')
 
-        logger.debug("Proxy request: %s %s", method, api_url)
+        logger.info("[PROXY] %s /%s/%s%s", method, identifier, endpoint,
+                     '?' + query_string if query_string else '')
 
         # --- Redirect mode (server-side forward, preserves headers/body) ---
         if identifier.endswith("_REDIRECT"):
@@ -800,106 +980,56 @@ def proxy_request(identifier, endpoint):
             target_url = api_url
             if request.query_string:
                 target_url += f"?{request.query_string.decode()}"
-            fwd_headers = dict(request.headers)
-            fwd_headers.pop("Host", None)
             try:
-                resp = getattr(http_requests, method.lower())(
-                    target_url,
-                    headers=fwd_headers,
-                    data=request.get_data(),
-                    allow_redirects=False,
-                    timeout=30,
-                )
+                fwd_api = API(request, target_url)
+                return fwd_api.forward()
             except http_requests.exceptions.RequestException as exc:
                 logger.error("Redirect forward failed: %s", exc)
                 return jsonify({"error": "Redirect forward failed"}), 502
-            try:
-                body = resp.json()
-            except ValueError:
-                body = {"raw": resp.text}
-            return jsonify(body), resp.status_code
 
-        # --- Parse body ---
-        data = request.get_json(silent=True) or {}
+        # --- Mock lookup using MockMatcher ---
+        mock_requests = db_get_mocks_for_proxy(identifier)
+        matcher = MockMatcher(mock_requests, endpoint, query_string, api_url)
+        _, mock_data = matcher.find(method)
 
-        # --- Collect headers / params ---
-        headers = dict(try_or(lambda: request.headers, {}))
-        headers.pop("Host", None)
-        params = try_or(lambda: request.args.to_dict(), {})
+        if mock_data:
+            headers = {k: v for k, v in request.headers.items() if k.lower() != 'host'}
+            json_body = request.get_json(silent=True) or {}
+            params = request.args.to_dict()
 
-        # --- Mock lookup ---
-        def try_mock(key):
-            mock_data = mock_requests.get(key, {}).get(method)
-            if mock_data is not None:
-                logger.debug("Mock hit: %s %s", method, key)
-                resolved = resolve_mock_data(
-                    copy.deepcopy(mock_data),
-                    header=headers,
-                    json_body=data,
-                    params=params,
-                    url=api_url,
+            mock_data_copy = copy.deepcopy(mock_data)
+
+            # Support status_code + body mock structure
+            if isinstance(mock_data_copy, dict) and "status_code" in mock_data_copy and "body" in mock_data_copy:
+                status_code = mock_data_copy["status_code"]
+                body = mock_data_copy["body"]
+                processed = resolve_mock_data(
+                    body, header=headers, json_body=json_body, params=params, url=api_url
                 )
-                return jsonify(resolved), 200
-            return None
+                return jsonify(processed), status_code
 
-        # Build candidates with and without query string
-        qs = request.query_string.decode()
-        endpoint_qs = f"{endpoint}?{qs}" if qs else None
-        slash_endpoint_qs = f"/{endpoint}?{qs}" if qs else None
-        api_url_qs = f"{api_url}?{qs}" if qs else None
-
-        # Try exact matches first (path without slash, with slash, full URL)
-        # — plain, then with query string appended
-        mock_response = (
-            try_mock(endpoint)
-            or try_mock(f"/{endpoint}")
-            or try_mock(api_url)
-            or (endpoint_qs and try_mock(endpoint_qs))
-            or (slash_endpoint_qs and try_mock(slash_endpoint_qs))
-            or (api_url_qs and try_mock(api_url_qs))
-        )
-        # Then try pattern matching against all forms
-        if not mock_response:
-            candidates = [endpoint, f"/{endpoint}", api_url]
-            if endpoint_qs:
-                candidates.extend([endpoint_qs, slash_endpoint_qs, api_url_qs])
-            for candidate in candidates:
-                matched_key = match_path(mock_requests, candidate)
-                if matched_key:
-                    mock_response = try_mock(matched_key)
-                    if mock_response:
-                        break
-
-        if mock_response:
-            return mock_response
+            processed = resolve_mock_data(
+                mock_data_copy, header=headers, json_body=json_body, params=params, url=api_url
+            )
+            return jsonify(processed), 200
 
         # --- SSRF guard ---
         if not _is_domain_allowed(api_domain):
             return jsonify({"error": "Target domain not allowed"}), 403
 
-        # --- Forward to real API ---
-        forward_kwargs = {"headers": headers, "params": params, "timeout": 30}
-        if method in ("POST", "PUT", "PATCH"):
-            forward_kwargs["json"] = data
-
-        logger.info("Forwarding %s %s", method, api_url)
-
+        # --- Forward to real API using API class ---
         try:
-            response = getattr(http_requests, method.lower())(api_url, **forward_kwargs)
-        except http_requests.exceptions.ConnectionError:
-            return jsonify({"error": "Connection error"}), 502
+            api = API(request, api_url)
+            return api.forward()
         except http_requests.exceptions.Timeout:
-            return jsonify({"error": "Request timed out"}), 504
+            logger.error("[PROXY] Timeout forwarding %s %s", method, api_url)
+            return jsonify({"error": f"Upstream timeout after {FORWARD_TIMEOUT}s"}), 504
+        except http_requests.exceptions.ConnectionError as exc:
+            logger.error("[PROXY] Connection error forwarding %s %s: %s", method, api_url, exc)
+            return jsonify({"error": "Upstream connection failed"}), 502
         except http_requests.exceptions.RequestException as exc:
-            logger.error("Request failed: %s", exc)
+            logger.error("[PROXY] Request failed: %s", exc)
             return jsonify({"error": "Upstream request failed"}), 502
-
-        try:
-            body = response.json()
-        except ValueError:
-            body = {"raw": response.text}
-
-        return jsonify(body), response.status_code
 
     except Exception:
         logger.exception("Unhandled error in proxy_request")
