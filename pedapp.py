@@ -1087,7 +1087,6 @@ def health_check():
 
 @app.route("/")
 @log_access
-@require_login
 def index():
     return render_template("index.html")
 
@@ -1653,16 +1652,22 @@ def proxy_request(identifier, endpoint):
 
 @app.route("/proxy/helper")
 @log_access
-@require_login
 def proxy_helper():
     return render_template("proxy_helper.html")
 
 
 @app.route("/proxy/")
 @log_access
-@require_login
 def proxy_server_page():
     return render_template("proxy_server.html")
+
+
+@app.route("/proxy/manage/")
+@log_access
+@require_login
+def proxy_manage_page():
+    """Protected management dashboard — proxy list, clone, import/export, history."""
+    return render_template("proxy_manage.html")
 
 
 # ---------------------------------------------------------------------------

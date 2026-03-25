@@ -331,68 +331,12 @@
 <body>
     <div class="topbar">
         <h1>Proxy Server &amp; Mock Builder</h1>
+        <a href="/proxy/manage/">Manage Proxies</a>
         <a href="/proxy/helper">Documentation</a>
         <a href="/">Home</a>
-        <a href="/logout" style="margin-left:auto;opacity:0.8;">Logout</a>
-    </div>
-
-    <!-- Health & Rate Limit Status Bar -->
-    <div class="status-bar" id="statusBar">
-        <span><span class="status-dot loading" id="healthDot"></span> <span id="healthText">Checking...</span></span>
-        <span id="rateLimitDisplay" class="rate-limit-info" style="display:none;"></span>
     </div>
 
     <div class="page">
-
-        <!-- ================================================================ -->
-        <!-- SECTION: Proxy List & Management                                 -->
-        <!-- ================================================================ -->
-        <div class="card full" style="margin-bottom:24px;">
-            <div class="section-header" onclick="toggleSection('proxyListBody','proxyListChevron')">
-                <span class="section-chevron" id="proxyListChevron">&#9660;</span>
-                <h2>Proxy List &amp; Management</h2>
-            </div>
-            <div id="proxyListBody" style="margin-top:14px;">
-                <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
-                    <button class="btn btn-blue btn-sm" onclick="loadProxyList()">Refresh List</button>
-                    <button class="btn btn-green btn-sm" onclick="exportAll()">Export All</button>
-                    <button class="btn btn-outline btn-sm" onclick="toggleImportSection()">Import</button>
-                </div>
-
-                <!-- Import Section (hidden by default) -->
-                <div id="importSection" style="display:none;margin-bottom:14px;padding:14px;background:#f8f9fa;border-radius:6px;border:1px solid var(--gray-border);">
-                    <label for="importJson">Paste Export JSON</label>
-                    <textarea id="importJson" style="min-height:100px;" placeholder='[{"identifier":"my-proxy","api_domain":"https://...","mocks":{...}}]'></textarea>
-                    <div style="margin-top:8px;display:flex;gap:8px;">
-                        <button class="btn btn-green btn-sm" onclick="doImport()">Import</button>
-                        <button class="btn btn-outline btn-sm" onclick="toggleImportSection()">Cancel</button>
-                    </div>
-                </div>
-
-                <!-- Clone inline form (hidden by default) -->
-                <div id="cloneSection" style="display:none;margin-bottom:14px;padding:14px;background:#f8f9fa;border-radius:6px;border:1px solid var(--gray-border);">
-                    <div class="inline-form">
-                        <div class="field">
-                            <label for="cloneSource">Source Identifier</label>
-                            <input type="text" id="cloneSource" placeholder="source-proxy" style="width:200px;" />
-                        </div>
-                        <div class="field">
-                            <label for="cloneTarget">New Identifier</label>
-                            <input type="text" id="cloneTarget" placeholder="cloned-proxy" style="width:200px;" />
-                        </div>
-                        <button class="btn btn-blue btn-sm" onclick="doClone()" style="margin-bottom:0;">Clone</button>
-                        <button class="btn btn-outline btn-sm" onclick="document.getElementById('cloneSection').style.display='none'" style="margin-bottom:0;">Cancel</button>
-                    </div>
-                </div>
-
-                <div id="proxyListContainer">
-                    <div class="empty-state"><p>Click "Refresh List" to load all proxies.</p></div>
-                </div>
-
-                <!-- Export response area -->
-                <div id="exportResponse" class="response-box" style="margin-top:14px;"></div>
-            </div>
-        </div>
 
         <!-- ================================================================ -->
         <!-- Row 1: Register + Lookup side by side                            -->
@@ -603,31 +547,6 @@
                 <div id="mocksContainer">
                     <div class="empty-state">
                         <p>Enter a proxy identifier and click Load to see its mocks.</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ================================================================ -->
-        <!-- SECTION: Request History                                         -->
-        <!-- ================================================================ -->
-        <div style="margin-top:24px;">
-            <div class="card full">
-                <div class="section-header" onclick="toggleSection('historyBody','historyChevron')">
-                    <span class="section-chevron" id="historyChevron">&#9660;</span>
-                    <h2>Request History</h2>
-                </div>
-                <div id="historyBody" style="margin-top:14px;">
-                    <div class="inline-form" style="margin-bottom:14px;">
-                        <div class="field" style="flex:0 0 240px;">
-                            <label for="history_proxy_id">Proxy Identifier</label>
-                            <input type="text" id="history_proxy_id" placeholder="my-proxy" />
-                        </div>
-                        <button class="btn btn-blue btn-sm" onclick="loadHistory()">Load History</button>
-                        <button class="btn btn-red btn-sm" onclick="clearHistory()">Clear History</button>
-                    </div>
-                    <div id="historyContainer">
-                        <div class="empty-state"><p>Enter a proxy identifier and click "Load History" to view request logs.</p></div>
                     </div>
                 </div>
             </div>
