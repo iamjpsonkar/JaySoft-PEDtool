@@ -12,7 +12,7 @@ import string
 import time
 import threading
 from base64 import b64decode, b64encode
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from urllib.parse import urlparse
 
@@ -50,8 +50,19 @@ FORWARD_TIMEOUT = int(os.environ.get("PED_FORWARD_TIMEOUT", "30"))
 REQUEST_HISTORY_LIMIT = int(os.environ.get("PED_HISTORY_LIMIT", "100"))
 UI_PASSWORD = os.environ.get("PED_UI_PASSWORD", "")  # empty = no login required
 
+_SECRET_KEY_DEV_FALLBACK = "ped-tools-dev-secret-DO-NOT-USE-IN-PROD"
+_secret_key = os.environ.get("PED_SECRET_KEY", "")
+if not _secret_key:
+    if DEBUG:
+        _secret_key = _SECRET_KEY_DEV_FALLBACK
+    else:
+        raise RuntimeError(
+            "PED_SECRET_KEY must be set when PED_DEBUG is not 'true'. "
+            "Generate one with: python -c 'import secrets; print(secrets.token_hex(32))'"
+        )
+
 app = Flask(__name__)
-app.secret_key = os.environ.get("PED_SECRET_KEY", "ped-tools-default-secret-change-me")
+app.secret_key = _secret_key
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -62,6 +73,12 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("pedapp")
+
+if app.secret_key == _SECRET_KEY_DEV_FALLBACK:
+    logger.warning(
+        "[STARTUP] PED_SECRET_KEY not set; using insecure DEV fallback. "
+        "Do NOT run this configuration in production."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -527,12 +544,27 @@ def require_login(f):
 
 
 def _is_domain_allowed(domain: str) -> bool:
-    """Return True when the domain is on the allowlist (or no allowlist is set)."""
+    """Return True when the domain is on the allowlist (or no allowlist is set).
+
+    Matching is exact-host OR dot-boundary suffix so that an allowlist entry of
+    'example.com' matches 'example.com' and 'api.example.com' but NOT
+    'evil-example.com'.
+    """
     if not ALLOWED_PROXY_DOMAINS:
         return True
-    parsed = urlparse(domain)
-    host = parsed.hostname or parsed.path
-    return any(host.endswith(allowed) for allowed in ALLOWED_PROXY_DOMAINS)
+    parsed = urlparse(domain if "://" in (domain or "") else f"//{domain}", scheme="")
+    host = (parsed.hostname or "").lower()
+    if not host:
+        logger.warning("[ALLOWLIST] Rejecting domain with no parseable host: %r", domain)
+        return False
+    for allowed in ALLOWED_PROXY_DOMAINS:
+        a = allowed.lower().lstrip(".")
+        if not a:
+            continue
+        if host == a or host.endswith("." + a):
+            return True
+    logger.warning("[ALLOWLIST] Host %r not in allowlist %s", host, ALLOWED_PROXY_DOMAINS)
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -831,21 +863,38 @@ class MockMatcher:
         return deduped
 
     def find(self, method):
-        """Return (mock_key, mock_data) or (None, None)."""
+        """Return (mock_key, mock_data) or (None, None).
+
+        Lookup order per variant:
+          1. exact path + exact method
+          2. exact path + '*'  (any-method registration, e.g. via POST /mock/<id>/<path>)
+          3. pattern path + exact method
+          4. pattern path + '*'
+        """
+        methods_to_try = [method, "*"] if method != "*" else ["*"]
+
         for variant in self.variants:
             mock_methods = self.mock_requests.get(variant)
-            if mock_methods and mock_methods.get(method):
-                logger.info("[MOCK HIT] %s matched exact key '%s'", method, variant)
-                return variant, mock_methods[method]
+            if not mock_methods:
+                continue
+            for m in methods_to_try:
+                if mock_methods.get(m):
+                    logger.info("[MOCK HIT] %s matched exact key '%s' (stored method=%s)",
+                                method, variant, m)
+                    return variant, mock_methods[m]
 
         for mock_key, mock_methods in self.mock_requests.items():
             if '<' not in mock_key:
                 continue
             regex = path_to_regex(mock_key)
             for variant in self.variants:
-                if regex.match(variant) and mock_methods.get(method):
-                    logger.info("[MOCK HIT] %s matched pattern key '%s' via '%s'", method, mock_key, variant)
-                    return mock_key, mock_methods[method]
+                if not regex.match(variant):
+                    continue
+                for m in methods_to_try:
+                    if mock_methods.get(m):
+                        logger.info("[MOCK HIT] %s matched pattern key '%s' via '%s' (stored method=%s)",
+                                    method, mock_key, variant, m)
+                        return mock_key, mock_methods[m]
 
         logger.info("[MOCK MISS] %s no match found, tried: %s", method, self.variants)
         return None, None
@@ -1074,7 +1123,7 @@ def health_check():
     code = 200 if db_ok else 503
     return jsonify({
         "status": status,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "database": "ok" if db_ok else "error",
         "version": "2.0.0",
     }), code
@@ -1346,7 +1395,7 @@ def export_proxy(identifier):
         "identifier": identifier,
         "api_domain": proxy["api_domain"],
         "mocked_requests": proxy["mocked_requests"],
-        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "exported_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
     return jsonify(export_data)
 
@@ -1368,7 +1417,7 @@ def export_all_proxies():
     return jsonify({
         "proxies": result,
         "count": len(result),
-        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "exported_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     })
 
 
@@ -1487,6 +1536,76 @@ def rate_limit_info(identifier):
 # ---------------------------------------------------------------------------
 # Routes — Proxy Passthrough
 # ---------------------------------------------------------------------------
+
+
+@app.route(
+    "/mock/<identifier>/<path:endpoint>",
+    methods=["POST"],
+)
+@log_access
+@require_auth
+def register_mock_by_url(identifier, endpoint):
+    """Register/update a mock by URL mirroring.
+
+    Swap '/proxy/' for '/mock/' in the retrieval URL and POST the desired response
+    body to register a static mock for that URL. Re-POST with a new body to update.
+    The mock is stored with method '*' so any retrieval method (GET/PUT/DELETE/...)
+    to the corresponding /proxy/<id>/<path> URL will match it.
+
+    The request body becomes the mock response. All existing mock shapes are
+    supported (plain dict, list for sequencing, {status_code,body,headers},
+    {conditions,responses,default}, placeholder resolvers inside values).
+    """
+    start_time = time.time()
+    try:
+        api_domain = db_get_proxy_domain(identifier)
+        if api_domain is None:
+            logger.warning("[MOCK REGISTER] Unknown proxy '%s'", identifier)
+            return jsonify({"error": f"Proxy '{identifier}' not found"}), 404
+
+        try:
+            mock_body = request.get_json(force=True)
+        except Exception as exc:
+            logger.warning("[MOCK REGISTER] Invalid JSON (identifier=%s): %s", identifier, exc)
+            return jsonify({"error": "Request body must be valid JSON"}), 400
+        if mock_body is None:
+            return jsonify({"error": "Request body must be JSON"}), 400
+
+        query_string = request.query_string.decode("utf-8")
+
+        # Storage key mirrors the /proxy/mock/create/ convention:
+        # leading-slash path, plus ?query-string suffix when present.
+        mock_key = endpoint if endpoint.startswith("/") else "/" + endpoint
+        if query_string:
+            mock_key = f"{mock_key}?{query_string}"
+
+        old_mock = db_upsert_mock(identifier, mock_key, "*", mock_body)
+
+        req_headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
+        req_body = request.get_data(as_text=True)[:2000] or None
+        duration_ms = int((time.time() - start_time) * 1000)
+        db_log_request(
+            identifier, endpoint, "POST", req_headers, req_body, query_string,
+            200, json.dumps(mock_body)[:2000], "mock_register", duration_ms,
+        )
+
+        logger.info(
+            "[MOCK REGISTER] identifier=%s key='%s' replaced_existing=%s bytes=%d",
+            identifier, mock_key, old_mock is not None,
+            len(json.dumps(mock_body)),
+        )
+        return jsonify({
+            "message": "Mock registered",
+            "proxy_identifier": identifier,
+            "end_point": mock_key,
+            "method": "*",
+            "new_mock": mock_body,
+            "old_mock": old_mock,
+        }), 200
+
+    except Exception:
+        logger.exception("[MOCK REGISTER] Unhandled error for identifier=%s", identifier)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @app.route(
