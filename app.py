@@ -1142,7 +1142,6 @@ def index():
 
 @app.route("/ped/encrypt", methods=["POST"])
 @log_access
-@require_auth
 def encrypt_endpoint():
     try:
         data = request.get_json(force=True)
@@ -1172,7 +1171,6 @@ def encrypt_endpoint():
 
 @app.route("/ped/decrypt", methods=["POST"])
 @log_access
-@require_auth
 def decrypt_endpoint():
     try:
         data = request.get_json(force=True)
@@ -1208,7 +1206,6 @@ def decrypt_endpoint():
 
 @app.route("/ped/prettify", methods=["POST"])
 @log_access
-@require_auth
 def prettify():
     request_json = request.json
     if not request_json:
@@ -1239,7 +1236,6 @@ def prettify():
 
 @app.route("/proxy/create/", methods=["POST"])
 @log_access
-@require_auth
 def create_proxy():
     request_data = request.json
     if not request_data:
@@ -1261,7 +1257,6 @@ def create_proxy():
 
 @app.route("/proxy/mock/create/", methods=["POST"])
 @log_access
-@require_auth
 def create_mock_proxy():
     request_data = request.json
     if not request_data:
@@ -1292,7 +1287,6 @@ def create_mock_proxy():
 
 @app.route("/proxy/mock/delete/", methods=["POST"])
 @log_access
-@require_auth
 def delete_mock():
     request_data = request.json
     if not request_data:
@@ -1336,7 +1330,6 @@ def list_proxies():
 
 @app.route("/proxy/get/<identifier>/", methods=["GET"])
 @log_access
-@require_auth
 def get_proxy(identifier):
     proxy = db_get_proxy(identifier)
     if not proxy:
@@ -1506,7 +1499,6 @@ def clear_history(identifier):
 
 @app.route("/proxy/sequence/reset/", methods=["POST"])
 @log_access
-@require_auth
 def reset_sequence():
     """Reset mock sequence counters."""
     request_data = request.json
@@ -1527,7 +1519,6 @@ def reset_sequence():
 
 @app.route("/proxy/ratelimit/<identifier>/", methods=["GET"])
 @log_access
-@require_auth
 def rate_limit_info(identifier):
     """Get current rate limit status for a proxy."""
     return jsonify(get_rate_limit_info(identifier))
@@ -1543,7 +1534,6 @@ def rate_limit_info(identifier):
     methods=["POST"],
 )
 @log_access
-@require_auth
 def register_mock_by_url(identifier, endpoint):
     """Register/update a mock by URL mirroring.
 
@@ -1613,7 +1603,6 @@ def register_mock_by_url(identifier, endpoint):
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
 )
 @log_access
-@require_auth
 def proxy_request(identifier, endpoint):
     start_time = time.time()
 
