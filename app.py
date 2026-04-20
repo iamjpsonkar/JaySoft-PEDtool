@@ -155,6 +155,13 @@ def init_db():
             call_count  INTEGER NOT NULL DEFAULT 0,
             UNIQUE(proxy_id, endpoint, method)
         );
+
+        CREATE TABLE IF NOT EXISTS mock_state (
+            proxy_id   TEXT PRIMARY KEY,
+            data       TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
         """
     )
     conn.commit()
@@ -434,6 +441,77 @@ def db_reset_sequence(proxy_id: str, endpoint: str | None = None) -> int:
         )
     db.commit()
     return cursor.rowcount
+
+
+# ---------------------------------------------------------------------------
+# DB helper functions — Per-proxy State (for dbget resolver)
+# ---------------------------------------------------------------------------
+
+
+def db_get_state(proxy_id: str) -> dict:
+    """Return the per-proxy state dict, or {} if none stored."""
+    db = _get_db()
+    row = db.execute(
+        "SELECT data FROM mock_state WHERE proxy_id = ?", (proxy_id,)
+    ).fetchone()
+    if not row:
+        return {}
+    try:
+        parsed = json.loads(row["data"])
+        return parsed if isinstance(parsed, dict) else {}
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("[STATE] Corrupt JSON for proxy '%s' — returning {}", proxy_id)
+        return {}
+
+
+def db_set_state(proxy_id: str, data: dict) -> None:
+    """Replace the per-proxy state with `data`."""
+    db = _get_db()
+    db.execute(
+        "INSERT INTO mock_state (proxy_id, data) VALUES (?, ?) "
+        "ON CONFLICT(proxy_id) DO UPDATE SET "
+        "data = excluded.data, updated_at = datetime('now')",
+        (proxy_id, json.dumps(data)),
+    )
+    db.commit()
+    logger.info("[STATE] Replaced for proxy '%s' (%d top-level keys)", proxy_id, len(data))
+
+
+def db_merge_state(proxy_id: str, patch: dict) -> dict:
+    """Shallow-merge `patch` into the per-proxy state. Returns the merged result.
+
+    Race-safe within a single SQLite process via the immediate-transaction
+    semantics; concurrent callers still race across read/write — last writer
+    wins at the key level.
+    """
+    current = db_get_state(proxy_id)
+    merged = {**current, **patch}
+    db_set_state(proxy_id, merged)
+    return merged
+
+
+def db_clear_state(proxy_id: str) -> bool:
+    """Drop the per-proxy state row. Returns True if something was deleted."""
+    db = _get_db()
+    cursor = db.execute(
+        "DELETE FROM mock_state WHERE proxy_id = ?", (proxy_id,)
+    )
+    db.commit()
+    if cursor.rowcount > 0:
+        logger.info("[STATE] Cleared for proxy '%s'", proxy_id)
+    return cursor.rowcount > 0
+
+
+def _get_state_for_resolver(proxy_id: str | None) -> dict:
+    """dbget() fetch helper. Robust to being called outside a Flask request
+    context (e.g. unit tests) — returns {} rather than raising."""
+    if not proxy_id:
+        return {}
+    try:
+        return db_get_state(proxy_id)
+    except (RuntimeError, sqlite3.Error) as exc:
+        logger.debug("[STATE] dbget: no DB context (%s)", exc)
+        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -1007,11 +1085,13 @@ def _parse_int_arg(arg_str: str, default: int = 0) -> int:
         return default
 
 
-def _resolve_value(value: str, header: dict, json_data: dict, params: dict, url: str | None):
+def _resolve_value(value: str, header: dict, json_data: dict, params: dict,
+                   url: str | None, proxy_id: str | None = None):
     """Resolve a single placeholder expression. Non-matching strings are returned as-is.
 
-    Returned type depends on the resolver: dotted paths / ``body()`` can return
-    dicts / lists / numbers so templates compose naturally.
+    Returned type depends on the resolver: dotted paths / ``body()`` /
+    ``dbget()`` can return dicts / lists / numbers so templates compose
+    naturally. ``proxy_id`` scopes ``dbget()`` lookups to the current proxy.
     """
     # --- Zero-arg resolvers (fast path) ---
     if value == "body()":
@@ -1050,6 +1130,13 @@ def _resolve_value(value: str, header: dict, json_data: dict, params: dict, url:
         result = extract_path_param(field, url)
         return result if result is not None else default
 
+    # --- State accessor (per-proxy mock_state, dotted path + optional default) ---
+    if value.startswith("dbget(") and value.endswith(")"):
+        field, default = _parse_resolver_args(value[6:-1], value)
+        state = _get_state_for_resolver(proxy_id)
+        resolved, found = _resolve_item_path(state, field)
+        return resolved if found else default
+
     # --- Generators (random) ---
     if value.startswith("alnum(") and value.endswith(")"):
         return _safe_alnum(value[6:-1])
@@ -1060,6 +1147,7 @@ def _resolve_value(value: str, header: dict, json_data: dict, params: dict, url:
                 "body": json_data or {},
                 "headers": header or {},
                 "params": params or {},
+                "state": _get_state_for_resolver(proxy_id),
                 "url": url or "",
                 "now_ts": time.time(),
             },
@@ -1071,7 +1159,8 @@ def _resolve_value(value: str, header: dict, json_data: dict, params: dict, url:
 
 
 def _resolve_to_int(raw, default: int, header: dict, json_data: dict,
-                    params: dict, url: str | None, label: str) -> int:
+                    params: dict, url: str | None, label: str,
+                    proxy_id: str | None = None) -> int:
     """Resolve a raw value — literal or placeholder string — to an int.
 
     Used by ``_delay_ms`` and ``status_code`` so they can reference request
@@ -1085,7 +1174,7 @@ def _resolve_to_int(raw, default: int, header: dict, json_data: dict,
     if isinstance(raw, (int, float)):
         return int(raw)
     if isinstance(raw, str):
-        resolved = _resolve_value(raw, header, json_data, params, url)
+        resolved = _resolve_value(raw, header, json_data, params, url, proxy_id)
         if isinstance(resolved, bool):
             return int(resolved)
         if isinstance(resolved, (int, float)):
@@ -1232,7 +1321,7 @@ def _substitute_item(node, item, key=None, index=None):
     return node
 
 
-def resolve_mock_data(data, header=None, json_body=None, params=None, url=None):
+def resolve_mock_data(data, header=None, json_body=None, params=None, url=None, proxy_id=None):
     """Walk a mock response dict/list and resolve all placeholder values.
 
     Supports a special '_foreach'/'_template' dict marker that expands into a
@@ -1420,13 +1509,13 @@ def resolve_mock_data(data, header=None, json_body=None, params=None, url=None):
         if isinstance(node, dict):
             for key, value in list(node.items()):
                 if isinstance(value, str):
-                    node[key] = _resolve_value(value, header, json_data, params, url)
+                    node[key] = _resolve_value(value, header, json_data, params, url, proxy_id)
                 elif isinstance(value, (dict, list)):
                     node[key] = process(value)
         elif isinstance(node, list):
             for i, item in enumerate(node):
                 if isinstance(item, str):
-                    node[i] = _resolve_value(item, header, json_data, params, url)
+                    node[i] = _resolve_value(item, header, json_data, params, url, proxy_id)
                 elif isinstance(item, (dict, list)):
                     node[i] = process(item)
         return node
@@ -2008,6 +2097,62 @@ def rate_limit_info(identifier):
 
 
 # ---------------------------------------------------------------------------
+# Routes — Per-proxy State (backing for the dbget() resolver)
+# ---------------------------------------------------------------------------
+
+
+@app.route("/proxy/state/<identifier>/", methods=["GET"])
+@log_access
+def get_proxy_state(identifier):
+    """Return the current per-proxy state dict (empty if nothing stored)."""
+    return jsonify({
+        "proxy_id": identifier,
+        "state": db_get_state(identifier),
+    })
+
+
+@app.route("/proxy/state/<identifier>/", methods=["PUT"])
+@log_access
+def set_proxy_state(identifier):
+    """Replace the per-proxy state with the request body (must be a JSON object)."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    db_set_state(identifier, data)
+    return jsonify({
+        "message": "State replaced",
+        "proxy_id": identifier,
+        "state": data,
+    })
+
+
+@app.route("/proxy/state/<identifier>/", methods=["PATCH"])
+@log_access
+def merge_proxy_state(identifier):
+    """Shallow-merge the request body into the per-proxy state."""
+    patch = request.get_json(silent=True)
+    if not isinstance(patch, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    merged = db_merge_state(identifier, patch)
+    return jsonify({
+        "message": "State merged",
+        "proxy_id": identifier,
+        "state": merged,
+    })
+
+
+@app.route("/proxy/state/<identifier>/", methods=["DELETE"])
+@log_access
+def clear_proxy_state(identifier):
+    """Drop the entire per-proxy state row."""
+    cleared = db_clear_state(identifier)
+    return jsonify({
+        "message": "State cleared" if cleared else "No state to clear",
+        "proxy_id": identifier,
+    })
+
+
+# ---------------------------------------------------------------------------
 # Routes — Proxy Passthrough
 # ---------------------------------------------------------------------------
 
@@ -2196,6 +2341,7 @@ def proxy_request(identifier, endpoint):
                 delay_raw = mock_data_copy.pop("_delay_ms", None)
             delay_ms = _resolve_to_int(
                 delay_raw, 0, headers, json_body, params, api_url, "DELAY",
+                proxy_id=identifier,
             )
             if delay_ms > 0:
                 logger.info("[DELAY] Sleeping %dms before responding", delay_ms)
@@ -2206,12 +2352,14 @@ def proxy_request(identifier, endpoint):
                 status_code = _resolve_to_int(
                     mock_data_copy["status_code"], 200,
                     headers, json_body, params, api_url, "STATUS",
+                    proxy_id=identifier,
                 )
                 # Response headers from mock
                 resp_headers = mock_data_copy.get("headers", {})
                 body = mock_data_copy["body"]
                 processed = resolve_mock_data(
-                    body, header=headers, json_body=json_body, params=params, url=api_url
+                    body, header=headers, json_body=json_body, params=params,
+                    url=api_url, proxy_id=identifier,
                 )
                 duration_ms = int((time.time() - start_time) * 1000)
                 db_log_request(
@@ -2227,7 +2375,8 @@ def proxy_request(identifier, endpoint):
                 return response
 
             processed = resolve_mock_data(
-                mock_data_copy, header=headers, json_body=json_body, params=params, url=api_url
+                mock_data_copy, header=headers, json_body=json_body, params=params,
+                url=api_url, proxy_id=identifier,
             )
             duration_ms = int((time.time() - start_time) * 1000)
             db_log_request(
