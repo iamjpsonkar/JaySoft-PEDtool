@@ -11,6 +11,7 @@ import sqlite3
 import string
 import time
 import threading
+import uuid as _uuid
 from base64 import b64decode, b64encode
 from datetime import datetime, timedelta, timezone
 from functools import wraps
@@ -935,72 +936,499 @@ def _safe_alnum(arg: str) -> str:
 # Safe snippet evaluator (sandboxed via simpleeval)
 # ---------------------------------------------------------------------------
 
+# Note: isinstance/type are rejected by current simpleeval versions
+# ("really bad idea") even in compound mode; keep them out.
 _SNIPPET_FUNCTIONS = {
     "abs": abs, "int": int, "float": float, "str": str, "len": len,
     "min": min, "max": max, "round": round, "sum": sum, "sorted": sorted,
     "list": list, "dict": dict, "tuple": tuple, "bool": bool,
     "enumerate": enumerate, "zip": zip, "range": range,
     "map": map, "filter": filter, "any": any, "all": all,
-    "isinstance": isinstance, "type": type,
 }
 
 _SNIPPET_MAX_LENGTH = 2000
 
 
-def safe_eval_snippet(snippet: str) -> str:
+def safe_eval_snippet(snippet: str, names: dict | None = None):
+    """Evaluate a simpleeval expression with optional read-only request context.
+
+    Caller-provided `names` (body/headers/params/url/now_ts) are surfaced to the
+    expression so mocks can do e.g. ``snippet(body['amount'] * 1.18)``.
+
+    Return type is preserved — `int`, `float`, `list`, `dict` etc. all pass
+    through (previously everything was stringified). Mocks that relied on
+    stringification should wrap explicitly: ``snippet(str(...))``.
+    """
     snippet = snippet.strip()
     if not snippet:
         return ""
     if len(snippet) > _SNIPPET_MAX_LENGTH:
         raise ValueError(f"snippet() expression too long ({len(snippet)} chars)")
 
-    evaluator = EvalWithCompoundTypes(functions=_SNIPPET_FUNCTIONS, names={})
+    evaluator = EvalWithCompoundTypes(functions=_SNIPPET_FUNCTIONS, names=names or {})
     try:
-        result = evaluator.eval(snippet)
-        return result if isinstance(result, str) else str(result)
+        return evaluator.eval(snippet)
     except Exception as exc:
         logger.warning("snippet() failed: %s — expr: %s", exc, snippet[:200])
         raise ValueError(f"snippet() evaluation error: {exc}") from exc
 
 
-def _resolve_value(value: str, header: dict, json_data: dict, params: dict, url: str | None) -> str | None:
-    if value.startswith("headerget(") and value.endswith(")"):
-        return header.get(value[10:-1], value)
+def _parse_resolver_args(arg_str: str, miss_fallback):
+    """Split a resolver argument string into (field, default).
+
+    Forms:
+        "x"               -> ("x", miss_fallback)
+        "x, y"            -> ("x", "y")
+        'x, "value,comma"' -> ("x", "value,comma")
+        "x, '123'"        -> ("x", "123")
+
+    Default is always a string (surrounding quotes stripped). When no comma is
+    present, `miss_fallback` is used — typically the original literal
+    expression, so unresolved placeholders stay visible for debuggability.
+    """
+    idx = arg_str.find(",")
+    if idx == -1:
+        return arg_str.strip(), miss_fallback
+    field = arg_str[:idx].strip()
+    default = arg_str[idx + 1:].strip()
+    if len(default) >= 2 and default[0] == default[-1] and default[0] in ('"', "'"):
+        default = default[1:-1]
+    return field, default
+
+
+def _parse_int_arg(arg_str: str, default: int = 0) -> int:
+    """Parse an optional signed integer argument (e.g. ``now(+3600)``)."""
+    arg_str = arg_str.strip()
+    if not arg_str:
+        return default
+    try:
+        return int(arg_str)
+    except ValueError:
+        return default
+
+
+def _resolve_value(value: str, header: dict, json_data: dict, params: dict, url: str | None):
+    """Resolve a single placeholder expression. Non-matching strings are returned as-is.
+
+    Returned type depends on the resolver: dotted paths / ``body()`` can return
+    dicts / lists / numbers so templates compose naturally.
+    """
+    # --- Zero-arg resolvers (fast path) ---
+    if value == "body()":
+        return json_data
+    if value == "now()":
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    if value == "now_epoch()":
+        return time.time()
+    if value == "uuid()":
+        return str(_uuid.uuid4())
+    if value == "uuid_short()":
+        return shortuuid.uuid()
+
+    # --- Time-with-offset: now(+3600), now(-60) ---
+    if value.startswith("now(") and value.endswith(")"):
+        offset = _parse_int_arg(value[4:-1])
+        return (
+            datetime.now(timezone.utc) + timedelta(seconds=offset)
+        ).isoformat().replace("+00:00", "Z")
+    if value.startswith("now_epoch(") and value.endswith(")"):
+        return time.time() + _parse_int_arg(value[10:-1])
+
+    # --- Request accessors (dotted path + optional default) ---
     if value.startswith("jsonget(") and value.endswith(")"):
-        return json_data.get(value[8:-1], value)
+        field, default = _parse_resolver_args(value[8:-1], value)
+        resolved, found = _resolve_item_path(json_data, field)
+        return resolved if found else default
+    if value.startswith("headerget(") and value.endswith(")"):
+        field, default = _parse_resolver_args(value[10:-1], value)
+        return header.get(field, default)
     if value.startswith("paramget(") and value.endswith(")"):
-        return params.get(value[9:-1], value)
+        field, default = _parse_resolver_args(value[9:-1], value)
+        return params.get(field, default)
     if value.startswith("pathparamget(") and value.endswith(")"):
-        return extract_path_param(value[13:-1], url)
+        field, default = _parse_resolver_args(value[13:-1], value)
+        result = extract_path_param(field, url)
+        return result if result is not None else default
+
+    # --- Generators (random) ---
     if value.startswith("alnum(") and value.endswith(")"):
         return _safe_alnum(value[6:-1])
     if value.startswith("snippet(") and value.endswith(")"):
-        return safe_eval_snippet(value[8:-1])
+        return safe_eval_snippet(
+            value[8:-1],
+            names={
+                "body": json_data or {},
+                "headers": header or {},
+                "params": params or {},
+                "url": url or "",
+                "now_ts": time.time(),
+            },
+        )
     for name, gen in _SAFE_GENERATORS.items():
         if value.startswith(f"{name}(") and value.endswith(")"):
-            return gen(value[len(name) + 1 : -1])
+            return gen(value[len(name) + 1:-1])
     return value
 
 
+def _resolve_to_int(raw, default: int, header: dict, json_data: dict,
+                    params: dict, url: str | None, label: str) -> int:
+    """Resolve a raw value — literal or placeholder string — to an int.
+
+    Used by ``_delay_ms`` and ``status_code`` so they can reference request
+    fields, e.g. ``"_delay_ms": "jsonget(delay_ms)"`` or
+    ``"status_code": "snippet(400 if body['fail'] else 200)"``.
+    """
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        return int(raw)
+    if isinstance(raw, (int, float)):
+        return int(raw)
+    if isinstance(raw, str):
+        resolved = _resolve_value(raw, header, json_data, params, url)
+        if isinstance(resolved, bool):
+            return int(resolved)
+        if isinstance(resolved, (int, float)):
+            return int(resolved)
+        try:
+            return int(str(resolved))
+        except (TypeError, ValueError):
+            logger.warning("[%s] cannot resolve %r to int — using %d", label, raw, default)
+            return default
+    return default
+
+
+_FOREACH_TOKEN_RE = re.compile(r"\$(?:item|value)(?:\.[\w.]+)?|\$key|\$index")
+
+
+def _resolve_item_path(item, path: str):
+    """Walk a dotted path on item. Dict segments match keys; list segments must be
+    numeric indices. Returns (value, found)."""
+    if not path:
+        return item, True
+    cur = item
+    for part in path.split("."):
+        if isinstance(cur, dict):
+            if part in cur:
+                cur = cur[part]
+            else:
+                return None, False
+        elif isinstance(cur, list):
+            try:
+                cur = cur[int(part)]
+            except (ValueError, IndexError):
+                return None, False
+        else:
+            return None, False
+    return cur, True
+
+
+def _match_foreach_where(conditions: list, item, key, index) -> bool:
+    """Evaluate _foreach _where filters against the current element.
+
+    Each condition is {source?, field?, operator, value?}.
+    Supported sources: item / value (current element, optionally with dotted
+    sub-field), key (dict key), index (iteration counter). Operators match the
+    conditional-mock set (eq/neq/contains/exists/not_exists/gt/lt/
+    starts_with/ends_with/regex plus equals/not_equals aliases).
+    """
+    if not conditions:
+        return True
+    _op_aliases = {"equals": "eq", "not_equals": "neq"}
+    for cond in conditions:
+        source = cond.get("source", "item")
+        field = cond.get("field", "")
+        op = _op_aliases.get(cond.get("operator", "eq"), cond.get("operator", "eq"))
+        expected = cond.get("value")
+
+        if source in ("item", "value"):
+            if field:
+                resolved, found = _resolve_item_path(item, field)
+                actual = resolved if found else None
+            else:
+                actual = item
+        elif source == "key":
+            actual = key
+        elif source == "index":
+            actual = index
+        else:
+            logger.warning("[FOREACH] _where: unsupported source %r — rejecting item", source)
+            return False
+
+        try:
+            if op == "eq" and str(actual) != str(expected):
+                return False
+            elif op == "neq" and str(actual) == str(expected):
+                return False
+            elif op == "contains" and (actual is None or str(expected) not in str(actual)):
+                return False
+            elif op == "exists" and actual is None:
+                return False
+            elif op == "not_exists" and actual is not None:
+                return False
+            elif op == "gt" and (actual is None or float(actual) <= float(expected)):
+                return False
+            elif op == "lt" and (actual is None or float(actual) >= float(expected)):
+                return False
+            elif op == "starts_with" and (actual is None or not str(actual).startswith(str(expected))):
+                return False
+            elif op == "ends_with" and (actual is None or not str(actual).endswith(str(expected))):
+                return False
+            elif op == "regex":
+                if actual is None:
+                    return False
+                if not re.search(str(expected), str(actual)):
+                    return False
+        except (ValueError, TypeError, re.error) as exc:
+            logger.warning("[FOREACH] _where: operator %s eval error (%s) — rejecting item", op, exc)
+            return False
+    return True
+
+
+def _foreach_token_value(token: str, item, key, index, fallback):
+    """Resolve one foreach token. Returns ``fallback`` if unresolvable so that
+    typos (e.g. referencing a missing sub-field) stay visible in the output."""
+    if token == "$item" or token == "$value":
+        return item
+    if token == "$key":
+        return key if key is not None else fallback
+    if token == "$index":
+        return index if index is not None else fallback
+    if token.startswith("$item."):
+        path = token[6:]
+    elif token.startswith("$value."):
+        path = token[7:]
+    else:
+        return fallback
+    val, found = _resolve_item_path(item, path)
+    return val if found else fallback
+
+
+def _substitute_item(node, item, key=None, index=None):
+    """Walk node and substitute foreach placeholder tokens.
+
+    Tokens (bare strings preserve type; embedded tokens are stringified):
+      $item / $value                — current element
+      $item.a.b.c / $value.a.b.c    — dotted sub-field on dict items (numeric
+                                      segments index into list items)
+      $key                          — current dict key (dict sources only)
+      $index                        — 0-based iteration counter
+    """
+    if isinstance(node, dict):
+        for k, v in list(node.items()):
+            node[k] = _substitute_item(v, item, key, index)
+        return node
+    if isinstance(node, list):
+        return [_substitute_item(x, item, key, index) for x in node]
+    if isinstance(node, str):
+        m = _FOREACH_TOKEN_RE.fullmatch(node)
+        if m:
+            return _foreach_token_value(m.group(0), item, key, index, fallback=node)
+
+        def _repl(match):
+            return str(_foreach_token_value(match.group(0), item, key, index, fallback=match.group(0)))
+
+        return _FOREACH_TOKEN_RE.sub(_repl, node)
+    return node
+
+
 def resolve_mock_data(data, header=None, json_body=None, params=None, url=None):
-    """Walk a mock response dict/list and resolve all placeholder values."""
+    """Walk a mock response dict/list and resolve all placeholder values.
+
+    Supports a special '_foreach'/'_template' dict marker that expands into a
+    list — one entry per element in a named JSON-body field. Source may be a
+    list OR a dict. Inside the template:
+
+      $item / $value  — current element's value (type-preserving when whole
+                        string, string interpolation when embedded)
+      $key            — current dict key (dict sources only)
+
+    Normal resolvers (jsonget/headerget/paramget/alnum/...) still run on the
+    rendered template afterwards.
+
+    List example:
+        "balanceDetails": {
+            "_foreach":  "filterKeys",
+            "_template": {"availableBalance": "", "instrumentId": "$item"}
+        }
+    Request body {"filterKeys": ["RONE", "EGV"]} →
+        "balanceDetails": [
+            {"availableBalance": "", "instrumentId": "RONE"},
+            {"availableBalance": "", "instrumentId": "EGV"}
+        ]
+
+    Dict example:
+        "users": {
+            "_foreach":  "userMap",
+            "_template": {"id": "$key", "name": "$value"}
+        }
+    Request body {"userMap": {"u1": "Alice", "u2": "Bob"}} →
+        "users": [
+            {"id": "u1", "name": "Alice"},
+            {"id": "u2", "name": "Bob"}
+        ]
+
+    If the named field is missing or not a list/dict the expansion yields [].
+    """
     header = header or {}
     json_data = json_body or {}
     params = params or {}
 
     def process(node):
+        # _random: pick one branch (optionally weighted). Evaluated before
+        # _foreach so both can compose when nested inside each other.
+        if isinstance(node, dict) and "_random" in node:
+            choices = node.get("_random")
+            if not isinstance(choices, list) or not choices:
+                logger.warning("[RANDOM] no choices — returning {}")
+                return {}
+            weights = []
+            for c in choices:
+                if isinstance(c, dict) and "weight" in c:
+                    try:
+                        w = max(0.0, float(c["weight"]))
+                    except (TypeError, ValueError):
+                        w = 1.0
+                else:
+                    w = 1.0
+                weights.append(w)
+            total = sum(weights)
+            picked_idx = len(choices) - 1
+            if total > 0:
+                r = random.uniform(0, total)
+                cum = 0.0
+                for i, w in enumerate(weights):
+                    cum += w
+                    if r <= cum:
+                        picked_idx = i
+                        break
+            picked = choices[picked_idx]
+            payload = picked.get("then") if isinstance(picked, dict) and "then" in picked else picked
+            logger.info(
+                "[RANDOM] picked index=%d of %d weight=%.3f",
+                picked_idx, len(choices), weights[picked_idx] if weights else 0.0,
+            )
+            return process(copy.deepcopy(payload))
+
+        # _foreach expansion runs before other processing so that token
+        # substitution happens on a fresh copy of the template per element.
+        if (
+            isinstance(node, dict)
+            and "_foreach" in node
+            and "_template" in node
+        ):
+            template = node.get("_template")
+            where_conditions = node.get("_where") or []
+            limit_raw = node.get("_limit")
+            as_dict = node.get("_as") == "dict"
+            key_template = node.get("_key")
+            source_raw = node.get("_foreach", "")
+
+            # Parse limit defensively — bad value logs + ignores.
+            limit = None
+            if limit_raw is not None:
+                try:
+                    limit = int(limit_raw)
+                    if limit < 0:
+                        logger.warning("[FOREACH] negative _limit %r — ignoring", limit_raw)
+                        limit = None
+                except (TypeError, ValueError):
+                    logger.warning("[FOREACH] invalid _limit %r — ignoring", limit_raw)
+
+            # Resolve source:
+            #   • list/dict value → already resolved (from nested $item.X substitution)
+            #   • string → dotted path on json_body, then literal-key fallback
+            if isinstance(source_raw, (list, dict)):
+                source = source_raw
+                found = True
+            elif isinstance(source_raw, str):
+                source, found = (
+                    _resolve_item_path(json_data, source_raw)
+                    if source_raw else (None, False)
+                )
+                if not found and source_raw in json_data:
+                    source = json_data[source_raw]
+                    found = True
+            else:
+                source, found = None, False
+
+            if isinstance(source, list):
+                kind = "list"
+                raw_entries = list(enumerate(source))
+                has_key = False
+            elif isinstance(source, dict):
+                kind = "dict"
+                raw_entries = list(enumerate(source.items()))
+                has_key = True
+            else:
+                empty = {} if as_dict else []
+                logger.info(
+                    "[FOREACH] %r missing or not a list/dict — returning %s",
+                    source_raw, "{}" if as_dict else "[]",
+                )
+                return empty
+
+            # _where filter
+            filtered = []
+            skipped = 0
+            for idx, entry in raw_entries:
+                if has_key:
+                    k, v = entry
+                else:
+                    k, v = None, entry
+                if where_conditions and not _match_foreach_where(where_conditions, v, k, idx):
+                    skipped += 1
+                    continue
+                filtered.append((idx, k, v))
+
+            # _limit slice
+            if limit is not None:
+                filtered = filtered[:limit]
+
+            # Build output (list or dict)
+            if as_dict:
+                out_dict = {}
+                for idx, k, v in filtered:
+                    rendered = _substitute_item(copy.deepcopy(template), v, key=k, index=idx)
+                    rendered = process(rendered)
+                    if key_template is not None:
+                        rk = _substitute_item(copy.deepcopy(key_template), v, key=k, index=idx)
+                    elif has_key:
+                        rk = k
+                    else:
+                        rk = idx
+                    # JSON object keys must be strings.
+                    out_dict[str(rk)] = rendered
+                logger.info(
+                    "[FOREACH] source=%s field=%r count=%d skipped=%d limit=%s out=dict",
+                    kind, source_raw if isinstance(source_raw, str) else "<resolved>",
+                    len(filtered), skipped, limit,
+                )
+                return out_dict
+
+            out_list = []
+            for idx, k, v in filtered:
+                rendered = _substitute_item(copy.deepcopy(template), v, key=k, index=idx)
+                out_list.append(process(rendered))
+            logger.info(
+                "[FOREACH] source=%s field=%r count=%d skipped=%d limit=%s out=list",
+                kind, source_raw if isinstance(source_raw, str) else "<resolved>",
+                len(filtered), skipped, limit,
+            )
+            return out_list
+
         if isinstance(node, dict):
-            for key, value in node.items():
+            for key, value in list(node.items()):
                 if isinstance(value, str):
                     node[key] = _resolve_value(value, header, json_data, params, url)
                 elif isinstance(value, (dict, list)):
-                    process(value)
+                    node[key] = process(value)
         elif isinstance(node, list):
             for i, item in enumerate(node):
                 if isinstance(item, str):
                     node[i] = _resolve_value(item, header, json_data, params, url)
                 elif isinstance(item, (dict, list)):
-                    process(item)
+                    node[i] = process(item)
         return node
 
     return process(data)
@@ -1761,17 +2189,24 @@ def proxy_request(identifier, endpoint):
                     logger.info("[CONDITIONAL] No condition matched, using default")
                 mock_data_copy = selected
 
-            # --- Response delay ---
-            delay_ms = 0
+            # --- Response delay (supports placeholder strings — e.g.
+            #     "_delay_ms": "jsonget(delay_ms)" or "snippet(...)"). ---
+            delay_raw = None
             if isinstance(mock_data_copy, dict):
-                delay_ms = mock_data_copy.pop("_delay_ms", 0)
+                delay_raw = mock_data_copy.pop("_delay_ms", None)
+            delay_ms = _resolve_to_int(
+                delay_raw, 0, headers, json_body, params, api_url, "DELAY",
+            )
             if delay_ms > 0:
                 logger.info("[DELAY] Sleeping %dms before responding", delay_ms)
                 time.sleep(delay_ms / 1000.0)
 
             # --- status_code + body structure ---
             if isinstance(mock_data_copy, dict) and "status_code" in mock_data_copy and "body" in mock_data_copy:
-                status_code = mock_data_copy["status_code"]
+                status_code = _resolve_to_int(
+                    mock_data_copy["status_code"], 200,
+                    headers, json_body, params, api_url, "STATUS",
+                )
                 # Response headers from mock
                 resp_headers = mock_data_copy.get("headers", {})
                 body = mock_data_copy["body"]
