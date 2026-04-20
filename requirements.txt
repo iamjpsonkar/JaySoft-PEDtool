@@ -1,6 +1,6 @@
-flask
-requests
-pycryptodome
-shortuuid
-python-dotenv
-simpleeval
+flask>=2.3,<4
+requests>=2.31,<3
+pycryptodome>=3.19,<4
+shortuuid>=1.0.11,<2
+python-dotenv>=1.0,<2
+simpleeval>=0.9.13,<2

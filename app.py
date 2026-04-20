@@ -104,69 +104,38 @@ def _close_db(_exc):
         db.close()
 
 
-def init_db():
-    """Create tables if they don't exist. Called once at startup."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS proxies (
-            identifier  TEXT PRIMARY KEY,
-            api_domain  TEXT NOT NULL,
-            created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-        );
+def _ensure_schema_ready() -> None:
+    """Fail fast if the DB/schema is missing. Bootstrap is now explicit.
 
-        CREATE TABLE IF NOT EXISTS mocks (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            proxy_id    TEXT NOT NULL REFERENCES proxies(identifier) ON DELETE CASCADE,
-            endpoint    TEXT NOT NULL,
-            method      TEXT NOT NULL,
-            response    TEXT NOT NULL,
-            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
-            UNIQUE(proxy_id, endpoint, method)
-        );
+    Run `python bootstrap.py` (or `./run.sh`, which calls it) before starting
+    the app. This keeps first-time setup out of import-time side effects.
+    """
+    must_exist = ("proxies", "mocks", "request_history", "mock_sequences", "mock_state")
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        logger.critical("[STARTUP] cannot open DB at %s: %s", DB_PATH, exc)
+        raise RuntimeError(
+            f"Cannot open DB at {DB_PATH}. Run `python bootstrap.py` first."
+        ) from exc
 
-        CREATE INDEX IF NOT EXISTS idx_mocks_proxy ON mocks(proxy_id);
-        CREATE INDEX IF NOT EXISTS idx_mocks_lookup ON mocks(proxy_id, endpoint, method);
-
-        CREATE TABLE IF NOT EXISTS request_history (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            proxy_id    TEXT NOT NULL,
-            endpoint    TEXT NOT NULL,
-            method      TEXT NOT NULL,
-            request_headers TEXT,
-            request_body    TEXT,
-            query_params    TEXT,
-            response_status INTEGER,
-            response_body   TEXT,
-            source          TEXT NOT NULL DEFAULT 'forward',
-            duration_ms     INTEGER,
-            created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_history_proxy ON request_history(proxy_id);
-        CREATE INDEX IF NOT EXISTS idx_history_time ON request_history(created_at);
-
-        CREATE TABLE IF NOT EXISTS mock_sequences (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            proxy_id    TEXT NOT NULL,
-            endpoint    TEXT NOT NULL,
-            method      TEXT NOT NULL,
-            call_count  INTEGER NOT NULL DEFAULT 0,
-            UNIQUE(proxy_id, endpoint, method)
-        );
-
-        CREATE TABLE IF NOT EXISTS mock_state (
-            proxy_id   TEXT PRIMARY KEY,
-            data       TEXT NOT NULL DEFAULT '{}',
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        """
-    )
-    conn.commit()
-    conn.close()
-    logger.info("Database initialized at %s", DB_PATH)
+    present = {r[0] for r in rows}
+    missing = [t for t in must_exist if t not in present]
+    if missing:
+        logger.critical(
+            "[STARTUP] DB at %s missing tables: %s", DB_PATH, ", ".join(missing)
+        )
+        raise RuntimeError(
+            f"DB at {DB_PATH} is missing tables: {', '.join(missing)}. "
+            f"Run `python bootstrap.py` first."
+        )
+    logger.info("[STARTUP] schema ok db_path=%s tables=%d", DB_PATH, len(present))
 
 
 # ---------------------------------------------------------------------------
@@ -2692,56 +2661,10 @@ def handle_exception(exc):
 
 
 # ---------------------------------------------------------------------------
-# Migrate from proxy_server.json (one-time)
-# ---------------------------------------------------------------------------
-
-
-def migrate_from_json(json_path: str):
-    if not os.path.exists(json_path):
-        return
-    try:
-        with open(json_path, "r") as f:
-            data = json.load(f)
-        if not data:
-            return
-
-        conn = sqlite3.connect(DB_PATH)
-        count_proxies = 0
-        count_mocks = 0
-        for identifier, entry in data.items():
-            api_domain = entry.get("api_domain", "")
-            conn.execute(
-                "INSERT OR IGNORE INTO proxies (identifier, api_domain) VALUES (?, ?)",
-                (identifier, api_domain),
-            )
-            count_proxies += 1
-            for endpoint, methods in entry.get("mocked_requests", {}).items():
-                for method, response in methods.items():
-                    conn.execute(
-                        "INSERT OR IGNORE INTO mocks (proxy_id, endpoint, method, response) "
-                        "VALUES (?, ?, ?, ?)",
-                        (identifier, endpoint, method, json.dumps(response)),
-                    )
-                    count_mocks += 1
-        conn.commit()
-        conn.close()
-
-        backup = json_path + ".migrated"
-        os.rename(json_path, backup)
-        logger.info(
-            "Migrated %d proxies and %d mocks from %s → SQLite (backup: %s)",
-            count_proxies, count_mocks, json_path, backup,
-        )
-    except Exception:
-        logger.exception("Migration from %s failed", json_path)
-
-
-# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
-init_db()
-migrate_from_json(os.path.join(_BASE_DIR, "proxy_server.json"))
+_ensure_schema_ready()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PED_PORT", 8000))

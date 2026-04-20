@@ -11,5 +11,8 @@ fi
 echo "Installing requirements..."
 "$VENV_DIR/bin/pip" install --quiet -r requirements.txt
 
+echo "Running bootstrap (init schema + one-time JSON migration)..."
+"$VENV_DIR/bin/python" bootstrap.py
+
 echo "Starting app..."
 "$VENV_DIR/bin/python" app.py

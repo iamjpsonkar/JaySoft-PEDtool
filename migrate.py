@@ -82,6 +82,13 @@ CREATE TABLE IF NOT EXISTS mock_sequences (
     call_count  INTEGER NOT NULL DEFAULT 0,
     UNIQUE(proxy_id, endpoint, method)
 );
+
+CREATE TABLE IF NOT EXISTS mock_state (
+    proxy_id   TEXT PRIMARY KEY,
+    data       TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
