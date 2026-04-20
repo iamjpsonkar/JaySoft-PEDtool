@@ -125,8 +125,8 @@ async function viewMocks(id) {
     document.getElementById('mocksModalBody').textContent = 'Loading...';
     document.getElementById('mocksModal').classList.add('visible');
     try {
-        var data = await api('/proxy/mocks/' + encodeURIComponent(id) + '/', 'GET');
-        document.getElementById('mocksModalBody').textContent = formatJson(data);
+        var data = await api('/proxy/get/' + encodeURIComponent(id) + '/', 'GET');
+        document.getElementById('mocksModalBody').textContent = formatJson(data.mocked_requests || data);
     } catch (err) {
         if (err && err.status === 401) { closeMocksModal(); handleApiError(err); return; }
         document.getElementById('mocksModalBody').textContent = formatJson(err.data || { error: 'Failed to load mocks' });
@@ -211,7 +211,7 @@ async function importProxies() {
 
 async function exportAll() {
     try {
-        var data = await api('/proxy/export/', 'GET');
+        var data = await api('/proxy/export/all/', 'GET');
         showResponse('exportResponse', data);
         showToast('Export data loaded.', 'success');
     } catch (err) {
@@ -256,8 +256,9 @@ async function loadHistory() {
             var method = entry.method || 'GET';
             var source = (entry.source || 'unknown').toLowerCase();
             var sourceBadgeClass = 'source-' + source;
-            var ts = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '-';
-            var status = entry.status || entry.status_code || '-';
+            var tsRaw = entry.created_at || entry.timestamp;
+            var ts = tsRaw ? new Date(tsRaw).toLocaleString() : '-';
+            var status = entry.response_status || entry.status || entry.status_code || '-';
             var duration = entry.duration_ms !== undefined ? entry.duration_ms : (entry.duration !== undefined ? entry.duration : '-');
 
             html += '<tr class="clickable-row" onclick="toggleHistoryDetail(' + idx + ')">' +

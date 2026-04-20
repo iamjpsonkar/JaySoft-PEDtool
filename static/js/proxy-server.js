@@ -398,26 +398,44 @@ function getMockPayload() {
     }
 
     // Check if sequence mode is active
+    // Backend cycles a bare list on each retrieval. Enhancements (delay/status/headers)
+    // apply per-step — if you need them, include the {status_code, body, _delay_ms, headers}
+    // shape inside each individual step JSON.
     if (document.getElementById('sequenceToggle').checked) {
         var steps = getSequenceSteps();
         if (steps.length < 2) {
             showToast('Sequence mode needs at least 2 steps', 'error');
             return null;
         }
-        var mock = { _sequence: steps };
-        mock = applyMockEnhancements(mock);
-        return { proxy_identifier: proxyId, end_point: endpoint, method: method, mock: mock };
+        return { proxy_identifier: proxyId, end_point: endpoint, method: method, mock: steps };
     }
 
     // Check if conditional mode is active
+    // Backend expects: {conditions: true, responses: [{when:[...], then:{...}}], default:{...}}.
+    // Each UI row becomes one `when` clause + its `then` response. Source/operator aliases
+    // (json_body→json, equals→eq, etc.) are accepted by the backend.
     if (document.getElementById('conditionalToggle').checked) {
         var condData = getConditions();
         if (condData.conditions.length === 0) {
             showToast('Conditional mode needs at least 1 condition', 'error');
             return null;
         }
-        var mock = { _conditions: condData.conditions, _default: condData.default };
-        mock = applyMockEnhancements(mock);
+        var responses = condData.conditions.map(function(c) {
+            return {
+                when: [{
+                    source: c.source || 'json',
+                    field: c.field,
+                    operator: c.operator,
+                    value: c.value
+                }],
+                then: c.response
+            };
+        });
+        var mock = {
+            conditions: true,
+            responses: responses,
+            "default": condData.default
+        };
         return { proxy_identifier: proxyId, end_point: endpoint, method: method, mock: mock };
     }
 
@@ -443,26 +461,37 @@ function getMockPayload() {
 }
 
 function applyMockEnhancements(mock) {
+    // Backend reads _delay_ms from the OUTER dict (before unwrapping status_code+body)
+    // and headers from the OUTER status_code+body wrapper only. So:
+    //   - wrap with {status_code, body, headers, _delay_ms} whenever a custom status
+    //     code OR custom response headers are supplied
+    //   - otherwise attach _delay_ms at the top level of the plain dict
     var delay = parseInt(document.getElementById('mock_delay').value, 10);
     var statusCode = parseInt(document.getElementById('mock_status_code').value, 10);
     var headersText = document.getElementById('mock_headers').value.trim();
 
-    if (delay && delay > 0) {
+    var headersObj = null;
+    if (headersText) {
+        try { headersObj = JSON.parse(headersText); }
+        catch (e) { /* silently ignore invalid headers JSON */ }
+    }
+
+    var customStatus = Number.isInteger(statusCode) && statusCode !== 200;
+    var needsWrap = customStatus || headersObj !== null;
+
+    if (needsWrap) {
+        var wrapped = {
+            status_code: customStatus ? statusCode : 200,
+            body: mock
+        };
+        if (headersObj) wrapped.headers = headersObj;
+        if (delay && delay > 0) wrapped._delay_ms = delay;
+        return wrapped;
+    }
+
+    if (delay && delay > 0 && mock && typeof mock === 'object' && !Array.isArray(mock)) {
         mock._delay_ms = delay;
     }
-
-    if (headersText) {
-        try {
-            mock.headers = JSON.parse(headersText);
-        } catch (e) {
-            // silently ignore invalid JSON
-        }
-    }
-
-    if (statusCode && statusCode !== 200) {
-        mock = { status_code: statusCode, body: mock };
-    }
-
     return mock;
 }
 
@@ -609,67 +638,79 @@ function editMock(endpoint, method, bodyObj) {
     document.getElementById('conditionalToggle').checked = false;
     onConditionalToggle();
 
-    // Detect enhanced mock structures and populate accordingly
+    // Detect enhanced mock structures and populate accordingly.
+    // Enhancement fields (_delay_ms, headers) live on the OUTER wrapper when the mock
+    // uses {status_code, body, ...}; otherwise _delay_ms sits at the top of a plain dict.
     var mockBody = bodyObj;
-    if (bodyObj && typeof bodyObj === 'object') {
-        // Detect status_code wrapper
+    if (bodyObj && typeof bodyObj === 'object' && !Array.isArray(bodyObj)) {
+        // Detect status_code wrapper — read delay/headers from the OUTER dict
         if (bodyObj.status_code && bodyObj.body) {
             document.getElementById('mock_status_code').value = bodyObj.status_code;
+            if (bodyObj._delay_ms) {
+                document.getElementById('mock_delay').value = bodyObj._delay_ms;
+            }
+            if (bodyObj.headers && typeof bodyObj.headers === 'object') {
+                document.getElementById('mock_headers').value = JSON.stringify(bodyObj.headers, null, 2);
+            }
             mockBody = bodyObj.body;
-        }
-        // Detect delay
-        if (mockBody._delay_ms) {
-            document.getElementById('mock_delay').value = mockBody._delay_ms;
-            var cleaned = Object.assign({}, mockBody);
+        } else if (bodyObj._delay_ms) {
+            document.getElementById('mock_delay').value = bodyObj._delay_ms;
+            var cleaned = Object.assign({}, bodyObj);
             delete cleaned._delay_ms;
             mockBody = cleaned;
         }
-        // Detect headers
-        if (mockBody.headers && typeof mockBody.headers === 'object') {
-            document.getElementById('mock_headers').value = JSON.stringify(mockBody.headers, null, 2);
+    }
+
+    // Detect sequence — backend uses a bare list at the mock root
+    if (Array.isArray(mockBody)) {
+        document.getElementById('sequenceToggle').checked = true;
+        onSequenceToggle();
+        document.getElementById('sequenceSteps').innerHTML = '';
+        _sequenceStepCount = 0;
+        mockBody.forEach(function(step) {
+            addSequenceStep(step);
+        });
+        switchTab('raw');
+        document.getElementById('mock_json_raw').value = JSON.stringify(bodyObj, null, 2);
+        window.scrollTo({ top: document.getElementById('mock_proxy_id').offsetTop - 80, behavior: 'smooth' });
+        showToast('Sequence mock loaded into editor', 'success');
+        return;
+    }
+
+    // Detect conditional — backend shape: {conditions, responses: [{when, then}], default}
+    if (mockBody && typeof mockBody === 'object'
+        && mockBody.conditions !== undefined
+        && Array.isArray(mockBody.responses)) {
+
+        // Translate backend vocabulary back to UI dropdown values.
+        var _srcBack = { json: 'json_body', param: 'query_param' };
+        var _opBack = { eq: 'equals', neq: 'not_equals' };
+
+        document.getElementById('conditionalToggle').checked = true;
+        onConditionalToggle();
+        document.getElementById('conditionRows').innerHTML = '';
+        _conditionRowCount = 0;
+        mockBody.responses.forEach(function(caseItem) {
+            addConditionRow();
+            var lastRow = document.querySelector('#conditionRows .condition-row:last-child');
+            if (!lastRow) return;
+            var firstCond = (caseItem.when && caseItem.when[0]) || {};
+            lastRow.querySelector('.cond-source').value = _srcBack[firstCond.source] || firstCond.source || 'header';
+            lastRow.querySelector('.cond-field').value = firstCond.field || '';
+            lastRow.querySelector('.cond-operator').value = _opBack[firstCond.operator] || firstCond.operator || 'equals';
+            lastRow.querySelector('.cond-value').value = firstCond.value != null ? firstCond.value : '';
+            var then = caseItem.then;
+            lastRow.querySelector('.cond-response').value = typeof then === 'object' ? JSON.stringify(then, null, 2) : (then || '');
+        });
+        var dflt = mockBody['default'];
+        if (dflt !== undefined) {
+            document.getElementById('conditionDefault').value = typeof dflt === 'object' ? JSON.stringify(dflt, null, 2) : dflt;
         }
-        // Detect sequence
-        if (mockBody._sequence && Array.isArray(mockBody._sequence)) {
-            document.getElementById('sequenceToggle').checked = true;
-            onSequenceToggle();
-            document.getElementById('sequenceSteps').innerHTML = '';
-            _sequenceStepCount = 0;
-            mockBody._sequence.forEach(function(step) {
-                addSequenceStep(step);
-            });
-            // Load into raw JSON tab
-            switchTab('raw');
-            document.getElementById('mock_json_raw').value = JSON.stringify(bodyObj, null, 2);
-            window.scrollTo({ top: document.getElementById('mock_proxy_id').offsetTop - 80, behavior: 'smooth' });
-            showToast('Sequence mock loaded into editor', 'success');
-            return;
-        }
-        // Detect conditional
-        if (mockBody._conditions && Array.isArray(mockBody._conditions)) {
-            document.getElementById('conditionalToggle').checked = true;
-            onConditionalToggle();
-            document.getElementById('conditionRows').innerHTML = '';
-            _conditionRowCount = 0;
-            mockBody._conditions.forEach(function(cond) {
-                addConditionRow();
-                var lastRow = document.querySelector('#conditionRows .condition-row:last-child');
-                if (lastRow) {
-                    lastRow.querySelector('.cond-source').value = cond.source || 'header';
-                    lastRow.querySelector('.cond-field').value = cond.field || '';
-                    lastRow.querySelector('.cond-operator').value = cond.operator || 'equals';
-                    lastRow.querySelector('.cond-value').value = cond.value || '';
-                    lastRow.querySelector('.cond-response').value = typeof cond.response === 'object' ? JSON.stringify(cond.response, null, 2) : (cond.response || '');
-                }
-            });
-            if (mockBody._default) {
-                document.getElementById('conditionDefault').value = typeof mockBody._default === 'object' ? JSON.stringify(mockBody._default, null, 2) : mockBody._default;
-            }
-            switchTab('raw');
-            document.getElementById('mock_json_raw').value = JSON.stringify(bodyObj, null, 2);
-            window.scrollTo({ top: document.getElementById('mock_proxy_id').offsetTop - 80, behavior: 'smooth' });
-            showToast('Conditional mock loaded into editor', 'success');
-            return;
-        }
+        switchTab('raw');
+        document.getElementById('mock_json_raw').value = JSON.stringify(bodyObj, null, 2);
+        window.scrollTo({ top: document.getElementById('mock_proxy_id').offsetTop - 80, behavior: 'smooth' });
+        showToast('Conditional mock loaded into editor', 'success');
+        return;
     }
 
     // Load into raw JSON tab

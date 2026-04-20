@@ -1011,18 +1011,54 @@ def resolve_mock_data(data, header=None, json_body=None, params=None, url=None):
 # ---------------------------------------------------------------------------
 
 
-def _check_conditions(conditions: list[dict], headers: dict, json_body: dict, params: dict) -> bool:
-    """Check if all conditions match. Each condition has field, source, operator, value."""
+def _check_conditions(
+    conditions: list[dict],
+    headers: dict,
+    json_body: dict,
+    params: dict,
+    path: str | None = None,
+    method: str | None = None,
+) -> bool:
+    """Check if all conditions match.
+
+    Each condition is {field, source?, operator, value?}.
+
+    Supported sources (aliases accepted for UI compatibility):
+      json / json_body  — field from request JSON body
+      header            — named request header
+      param / query_param — query parameter
+      path              — URL path ('field' ignored)
+      method            — HTTP method ('field' ignored)
+
+    Supported operators:
+      eq / equals, neq / not_equals, contains, exists, not_exists,
+      gt, lt, starts_with, ends_with, regex.
+    """
+    _SOURCE_ALIASES = {
+        "json_body": "json",
+        "query_param": "param",
+    }
+    _OP_ALIASES = {
+        "equals": "eq",
+        "not_equals": "neq",
+    }
+
     for cond in conditions:
-        source_type = cond.get("source", "json")  # json, header, param
+        raw_source = cond.get("source", "json")
+        source_type = _SOURCE_ALIASES.get(raw_source, raw_source)
         field = cond.get("field", "")
-        operator = cond.get("operator", "eq")
+        raw_op = cond.get("operator", "eq")
+        operator = _OP_ALIASES.get(raw_op, raw_op)
         expected = cond.get("value")
 
         if source_type == "header":
             actual = headers.get(field)
         elif source_type == "param":
             actual = params.get(field)
+        elif source_type == "path":
+            actual = path
+        elif source_type == "method":
+            actual = method
         else:
             actual = json_body.get(field)
 
@@ -1040,6 +1076,19 @@ def _check_conditions(conditions: list[dict], headers: dict, json_body: dict, pa
             return False
         elif operator == "lt" and (actual is None or float(actual) >= float(expected)):
             return False
+        elif operator == "starts_with" and (actual is None or not str(actual).startswith(str(expected))):
+            return False
+        elif operator == "ends_with" and (actual is None or not str(actual).endswith(str(expected))):
+            return False
+        elif operator == "regex":
+            if actual is None:
+                return False
+            try:
+                if not re.search(str(expected), str(actual)):
+                    return False
+            except re.error as exc:
+                logger.warning("[CONDITIONAL] Invalid regex %r: %s", expected, exc)
+                return False
     return True
 
 
@@ -1354,8 +1403,14 @@ def clone_proxy():
     if not request_data:
         return jsonify({"error": "Request body must be JSON"}), 400
 
-    source_id = request_data.get("source_identifier")
-    target_id = request_data.get("target_identifier") or shortuuid.uuid()
+    # Accept both long-form (source_identifier/target_identifier) and short-form
+    # (source/target) field names for compatibility with the management UI.
+    source_id = request_data.get("source_identifier") or request_data.get("source")
+    target_id = (
+        request_data.get("target_identifier")
+        or request_data.get("target")
+        or shortuuid.uuid()
+    )
 
     if not source_id:
         return jsonify({"error": "source_identifier is required"}), 400
@@ -1529,6 +1584,9 @@ def rate_limit_info(identifier):
 # ---------------------------------------------------------------------------
 
 
+_SUPPORTED_MOCK_METHODS = {"*", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+
+
 @app.route(
     "/mock/<identifier>/<path:endpoint>",
     methods=["POST"],
@@ -1539,8 +1597,12 @@ def register_mock_by_url(identifier, endpoint):
 
     Swap '/proxy/' for '/mock/' in the retrieval URL and POST the desired response
     body to register a static mock for that URL. Re-POST with a new body to update.
-    The mock is stored with method '*' so any retrieval method (GET/PUT/DELETE/...)
-    to the corresponding /proxy/<id>/<path> URL will match it.
+
+    Method pinning (optional):
+      - Default: stored with method '*' — matches any retrieval method.
+      - Override: send 'X-Mock-Method: GET' (or POST/PUT/PATCH/DELETE/HEAD/OPTIONS)
+        to pin the mock to a specific HTTP method. A method-specific mock takes
+        precedence over '*' at the same path during retrieval.
 
     The request body becomes the mock response. All existing mock shapes are
     supported (plain dict, list for sequencing, {status_code,body,headers},
@@ -1561,6 +1623,20 @@ def register_mock_by_url(identifier, endpoint):
         if mock_body is None:
             return jsonify({"error": "Request body must be JSON"}), 400
 
+        # Method pinning via optional X-Mock-Method header; defaults to '*'
+        # so a single registration matches any retrieval method.
+        raw_method = (request.headers.get("X-Mock-Method") or "*").strip().upper()
+        if raw_method not in _SUPPORTED_MOCK_METHODS:
+            logger.warning(
+                "[MOCK REGISTER] Unsupported X-Mock-Method: %r (identifier=%s)",
+                raw_method, identifier,
+            )
+            return jsonify({
+                "error": f"Unsupported X-Mock-Method: {raw_method!r}",
+                "supported": sorted(_SUPPORTED_MOCK_METHODS),
+            }), 400
+        stored_method = raw_method
+
         query_string = request.query_string.decode("utf-8")
 
         # Storage key mirrors the /proxy/mock/create/ convention:
@@ -1569,7 +1645,7 @@ def register_mock_by_url(identifier, endpoint):
         if query_string:
             mock_key = f"{mock_key}?{query_string}"
 
-        old_mock = db_upsert_mock(identifier, mock_key, "*", mock_body)
+        old_mock = db_upsert_mock(identifier, mock_key, stored_method, mock_body)
 
         req_headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
         req_body = request.get_data(as_text=True)[:2000] or None
@@ -1580,15 +1656,15 @@ def register_mock_by_url(identifier, endpoint):
         )
 
         logger.info(
-            "[MOCK REGISTER] identifier=%s key='%s' replaced_existing=%s bytes=%d",
-            identifier, mock_key, old_mock is not None,
+            "[MOCK REGISTER] identifier=%s key='%s' method=%s replaced_existing=%s bytes=%d",
+            identifier, mock_key, stored_method, old_mock is not None,
             len(json.dumps(mock_body)),
         )
         return jsonify({
             "message": "Mock registered",
             "proxy_identifier": identifier,
             "end_point": mock_key,
-            "method": "*",
+            "method": stored_method,
             "new_mock": mock_body,
             "old_mock": old_mock,
         }), 200
@@ -1676,7 +1752,7 @@ def proxy_request(identifier, endpoint):
                 selected = None
                 for case in mock_data_copy["responses"]:
                     case_conditions = case.get("when", [])
-                    if _check_conditions(case_conditions, headers, json_body, params):
+                    if _check_conditions(case_conditions, headers, json_body, params, path=endpoint, method=method):
                         selected = case.get("then", {})
                         logger.info("[CONDITIONAL] Matched condition: %s", case_conditions)
                         break
