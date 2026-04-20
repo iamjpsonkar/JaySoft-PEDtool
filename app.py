@@ -1027,15 +1027,17 @@ _SNIPPET_FUNCTIONS = {
 _SNIPPET_MAX_LENGTH = 2000
 
 
-def safe_eval_snippet(snippet: str, names: dict | None = None):
+def safe_eval_snippet(snippet: str, names: dict | None = None,
+                       functions: dict | None = None):
     """Evaluate a simpleeval expression with optional read-only request context.
 
-    Caller-provided `names` (body/headers/params/url/now_ts) are surfaced to the
-    expression so mocks can do e.g. ``snippet(body['amount'] * 1.18)``.
+    `names` — data surfaced as variables (body/headers/params/state/url/now_ts).
+    `functions` — extra callables merged with the built-in safe set; callers
+    wire resolver shortcuts (jsonget/dbget/now/...) so snippets can invoke
+    them directly, e.g. ``snippet(dbget('user.tier', 'none') == 'gold')``.
 
     Return type is preserved — `int`, `float`, `list`, `dict` etc. all pass
-    through (previously everything was stringified). Mocks that relied on
-    stringification should wrap explicitly: ``snippet(str(...))``.
+    through.
     """
     snippet = snippet.strip()
     if not snippet:
@@ -1043,7 +1045,11 @@ def safe_eval_snippet(snippet: str, names: dict | None = None):
     if len(snippet) > _SNIPPET_MAX_LENGTH:
         raise ValueError(f"snippet() expression too long ({len(snippet)} chars)")
 
-    evaluator = EvalWithCompoundTypes(functions=_SNIPPET_FUNCTIONS, names=names or {})
+    fns = dict(_SNIPPET_FUNCTIONS)
+    if functions:
+        fns.update(functions)
+
+    evaluator = EvalWithCompoundTypes(functions=fns, names=names or {})
     try:
         return evaluator.eval(snippet)
     except Exception as exc:
@@ -1083,6 +1089,71 @@ def _parse_int_arg(arg_str: str, default: int = 0) -> int:
         return int(arg_str)
     except ValueError:
         return default
+
+
+def _snippet_context(header, json_data, params, url, proxy_id):
+    """Build names+functions dicts for safe_eval_snippet.
+
+    Exposes request state (body/headers/params/state/url/now_ts) as variables
+    AND wires the standard resolvers as callables, so snippets can do e.g.::
+
+        snippet(jsonget('user.name', 'anon'))
+        snippet(dbget('ver', 0) + 1)
+        snippet(now() if jsonget('track') else '')
+    """
+    _body = json_data or {}
+    _header = header or {}
+    _params = params or {}
+    _state = _get_state_for_resolver(proxy_id)
+    _url = url or ""
+
+    def _fn_jsonget(path, default=None):
+        v, ok = _resolve_item_path(_body, path)
+        return v if ok else default
+
+    def _fn_dbget(path, default=None):
+        v, ok = _resolve_item_path(_state, path)
+        return v if ok else default
+
+    def _fn_headerget(name, default=None):
+        return _header.get(name, default)
+
+    def _fn_paramget(name, default=None):
+        return _params.get(name, default)
+
+    def _fn_pathparamget(prefix, default=None):
+        v = extract_path_param(prefix, _url)
+        return v if v is not None else default
+
+    def _fn_now(offset=0):
+        return (
+            datetime.now(timezone.utc) + timedelta(seconds=int(offset or 0))
+        ).isoformat().replace("+00:00", "Z")
+
+    def _fn_now_epoch(offset=0):
+        return time.time() + int(offset or 0)
+
+    return {
+        "names": {
+            "body": _body,
+            "headers": _header,
+            "params": _params,
+            "state": _state,
+            "url": _url,
+            "now_ts": time.time(),
+        },
+        "functions": {
+            "jsonget": _fn_jsonget,
+            "dbget": _fn_dbget,
+            "headerget": _fn_headerget,
+            "paramget": _fn_paramget,
+            "pathparamget": _fn_pathparamget,
+            "now": _fn_now,
+            "now_epoch": _fn_now_epoch,
+            "uuid": lambda: str(_uuid.uuid4()),
+            "uuid_short": lambda: shortuuid.uuid(),
+        },
+    }
 
 
 def _resolve_value(value: str, header: dict, json_data: dict, params: dict,
@@ -1143,14 +1214,7 @@ def _resolve_value(value: str, header: dict, json_data: dict, params: dict,
     if value.startswith("snippet(") and value.endswith(")"):
         return safe_eval_snippet(
             value[8:-1],
-            names={
-                "body": json_data or {},
-                "headers": header or {},
-                "params": params or {},
-                "state": _get_state_for_resolver(proxy_id),
-                "url": url or "",
-                "now_ts": time.time(),
-            },
+            **_snippet_context(header, json_data, params, url, proxy_id),
         )
     for name, gen in _SAFE_GENERATORS.items():
         if value.startswith(f"{name}(") and value.endswith(")"):
@@ -1188,6 +1252,125 @@ def _resolve_to_int(raw, default: int, header: dict, json_data: dict,
 
 
 _FOREACH_TOKEN_RE = re.compile(r"\$(?:item|value)(?:\.[\w.]+)?|\$key|\$index")
+
+
+def _set_item_path(root, path: str, value) -> bool:
+    """Set `value` at a dotted path in `root` dict, creating intermediate
+    dicts as needed. Returns True on success."""
+    if not isinstance(root, dict) or not path:
+        return False
+    parts = path.split(".")
+    cur = root
+    for part in parts[:-1]:
+        if part not in cur or not isinstance(cur[part], dict):
+            cur[part] = {}
+        cur = cur[part]
+    cur[parts[-1]] = value
+    return True
+
+
+def _delete_item_path(root, path: str) -> bool:
+    """Delete the value at a dotted path. Returns True if something was deleted."""
+    if not isinstance(root, dict) or not path:
+        return False
+    parts = path.split(".")
+    cur = root
+    for part in parts[:-1]:
+        if not isinstance(cur, dict) or part not in cur:
+            return False
+        cur = cur[part]
+    if isinstance(cur, dict) and parts[-1] in cur:
+        del cur[parts[-1]]
+        return True
+    return False
+
+
+def _resolve_path_template(template: str, header, json_data, params, url, proxy_id) -> str:
+    """Resolve each dot-separated segment of a path template through the resolver
+    pipeline, then re-join.
+
+    ``"orders.jsonget(orderId)"`` with body ``{"orderId": "O_123"}`` becomes
+    ``"orders.O_123"`` — the pattern most useful for mongo-style keys.
+    """
+    parts = template.split(".")
+    out = []
+    for p in parts:
+        r = _resolve_value(p, header, json_data, params, url, proxy_id)
+        out.append("null" if r is None else str(r))
+    return ".".join(out)
+
+
+def _apply_store_ops(ops, proxy_id, header, json_body, params, url):
+    """Apply ``_store`` side-effects: write resolved values into per-proxy state.
+
+    Accepted op shapes (or a list of them):
+
+        {"path": "a.b.c", "value": <anything>}              # set
+        {"collection": "orders", "key": "...", "value": ..} # set (mongo-style)
+        {"path": "a.b.c", "delete": true}                   # delete
+
+    ``path`` / ``collection`` / ``key`` segments pass through the resolver
+    pipeline so expressions like ``"orders.jsonget(orderId)"`` work. ``value``
+    is resolved too — strings go through ``_resolve_value``, compound
+    structures through ``resolve_mock_data`` (so nested placeholders, _foreach,
+    _random all work inside the stored value).
+    """
+    if ops is None or not proxy_id:
+        return
+    if isinstance(ops, dict):
+        ops = [ops]
+    if not isinstance(ops, list):
+        logger.warning("[STORE] unsupported shape %r — ignoring", type(ops).__name__)
+        return
+
+    state = db_get_state(proxy_id)
+    dirty = False
+    for op in ops:
+        if not isinstance(op, dict):
+            continue
+        if "collection" in op and "key" in op:
+            col = op["collection"]
+            key = op["key"]
+            col_r = (
+                _resolve_value(col, header, json_body, params, url, proxy_id)
+                if isinstance(col, str) else col
+            )
+            key_r = (
+                _resolve_value(key, header, json_body, params, url, proxy_id)
+                if isinstance(key, str) else key
+            )
+            path = f"{col_r}.{key_r}"
+        elif "path" in op:
+            tmpl = op["path"]
+            if not isinstance(tmpl, str):
+                continue
+            path = _resolve_path_template(tmpl, header, json_body, params, url, proxy_id)
+        else:
+            logger.warning("[STORE] op missing collection/key or path: %r", op)
+            continue
+
+        if op.get("delete"):
+            if _delete_item_path(state, path):
+                dirty = True
+                logger.info("[STORE] delete path=%r", path)
+        else:
+            raw = op.get("value")
+            if isinstance(raw, str):
+                resolved_value = _resolve_value(raw, header, json_body, params, url, proxy_id)
+            elif isinstance(raw, (dict, list)):
+                resolved_value = resolve_mock_data(
+                    copy.deepcopy(raw),
+                    header=header, json_body=json_body, params=params,
+                    url=url, proxy_id=proxy_id,
+                )
+            else:
+                resolved_value = raw
+            _set_item_path(state, path, resolved_value)
+            dirty = True
+            logger.info("[STORE] set path=%r", path)
+
+    if dirty:
+        db_set_state(proxy_id, state)
 
 
 def _resolve_item_path(item, path: str):
@@ -2333,6 +2516,17 @@ def proxy_request(identifier, endpoint):
                     selected = mock_data_copy.get("default", {"error": "No condition matched"})
                     logger.info("[CONDITIONAL] No condition matched, using default")
                 mock_data_copy = selected
+
+            # --- Apply _store side-effects (mongo-like per-proxy state) ---
+            # Popped before delay so it runs exactly once per response, regardless
+            # of whether we hit the plain-dict path or the {status_code, body} path.
+            # Placed after sequence + conditional selection so _store inside a
+            # sequence step or conditional "then" still applies.
+            if isinstance(mock_data_copy, dict):
+                _apply_store_ops(
+                    mock_data_copy.pop("_store", None),
+                    identifier, headers, json_body, params, api_url,
+                )
 
             # --- Response delay (supports placeholder strings — e.g.
             #     "_delay_ms": "jsonget(delay_ms)" or "snippet(...)"). ---
