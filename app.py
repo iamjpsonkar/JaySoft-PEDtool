@@ -1133,6 +1133,37 @@ def _snippet_context(header, json_data, params, url, proxy_id):
     def _fn_now_epoch(offset=0):
         return time.time() + int(offset or 0)
 
+    # --- Random-string generators (the same ones the non-snippet resolvers
+    # expose: upper(N) / lower(N) / chars(N) / digit(N) / alnum(...)). In
+    # snippet-land they take ordinary Python args instead of a parsed string.
+    def _fn_upper(n):
+        return "".join(random.choices(string.ascii_uppercase, k=int(n)))
+
+    def _fn_lower(n):
+        return "".join(random.choices(string.ascii_lowercase, k=int(n)))
+
+    def _fn_chars(n):
+        return "".join(random.choices(string.ascii_letters, k=int(n)))
+
+    def _fn_digit(n):
+        return "".join(random.choices(string.digits, k=int(n)))
+
+    def _fn_alnum(*parts):
+        """alnum(3, 4, 2, 1) → 3 letters + 4 digits + 2 letters + 1 digit."""
+        if len(parts) % 2 != 0:
+            raise ValueError("alnum() requires an even number of arguments")
+        out = []
+        for i in range(0, len(parts), 2):
+            out.append("".join(random.choices(string.ascii_letters, k=int(parts[i]))))
+            out.append("".join(random.choices(string.digits, k=int(parts[i + 1]))))
+        return "".join(out)
+
+    def _fn_body():
+        return _body
+
+    def _fn_state_all():
+        return _state
+
     return {
         "names": {
             "body": _body,
@@ -1143,15 +1174,27 @@ def _snippet_context(header, json_data, params, url, proxy_id):
             "now_ts": time.time(),
         },
         "functions": {
+            # Request accessors
             "jsonget": _fn_jsonget,
-            "dbget": _fn_dbget,
             "headerget": _fn_headerget,
             "paramget": _fn_paramget,
             "pathparamget": _fn_pathparamget,
+            # State accessor
+            "dbget": _fn_dbget,
+            # Whole-payload accessors
+            "body": _fn_body,
+            "state_all": _fn_state_all,
+            # Time + identity
             "now": _fn_now,
             "now_epoch": _fn_now_epoch,
             "uuid": lambda: str(_uuid.uuid4()),
             "uuid_short": lambda: shortuuid.uuid(),
+            # Random-string generators
+            "upper": _fn_upper,
+            "lower": _fn_lower,
+            "chars": _fn_chars,
+            "digit": _fn_digit,
+            "alnum": _fn_alnum,
         },
     }
 
