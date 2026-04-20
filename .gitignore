@@ -7,8 +7,7 @@
 *.db
 *.db-shm
 *.db-wal
-proxy_server.json
-proxy_server.json.migrated
+*.db.bak.*
 
 # Python
 __pycache__/

@@ -60,15 +60,13 @@ python app.py
 
 The app listens at `http://localhost:8000` (or `PED_PORT`).
 
-### Database migration
-
-Upgrading from an earlier schema? Run:
+### First-time setup
 
 ```bash
-python migrate.py
+./setup.sh
 ```
 
-Legacy `proxy_server.json` files are migrated into SQLite automatically on first startup and renamed `proxy_server.json.migrated`.
+Runs the venv + deps install, backs up any existing DB, and applies the schema via `bootstrap.py`. Idempotent — safe to re-run after pulling changes.
 
 ## Authentication
 

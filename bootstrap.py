@@ -2,18 +2,16 @@
 """
 First-time setup for PED Tools.
 
-- Creates SQLite tables (idempotent; safe to re-run)
-- Migrates legacy proxy_server.json -> SQLite (one-shot; renames source to .migrated)
+Creates the SQLite schema. Idempotent — safe to re-run.
 
-Run explicitly:
+Usage:
     python bootstrap.py
 
-run.sh invokes this before starting the app.
+setup.sh / run.sh invoke this before starting the app.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sqlite3
@@ -102,62 +100,8 @@ def init_db(db_path: str = DB_PATH) -> None:
     logger.info("[BOOTSTRAP] init_db ok db_path=%s", db_path)
 
 
-def migrate_from_json(json_path: str, db_path: str = DB_PATH) -> None:
-    """One-shot migration of legacy proxy_server.json into SQLite.
-
-    Renames the source file to ``<path>.migrated`` on success to ensure a
-    single-run behaviour. No-op when the file doesn't exist or is empty.
-    """
-    if not os.path.exists(json_path):
-        logger.debug("[BOOTSTRAP] migrate_from_json skip (no file) path=%s", json_path)
-        return
-
-    logger.info("[BOOTSTRAP] migrate_from_json start path=%s", json_path)
-    try:
-        with open(json_path, "r") as f:
-            data = json.load(f)
-
-        if not data:
-            logger.info("[BOOTSTRAP] migrate_from_json skip (empty) path=%s", json_path)
-            return
-
-        conn = sqlite3.connect(db_path)
-        try:
-            count_proxies = 0
-            count_mocks = 0
-            for identifier, entry in data.items():
-                api_domain = entry.get("api_domain", "")
-                conn.execute(
-                    "INSERT OR IGNORE INTO proxies (identifier, api_domain) VALUES (?, ?)",
-                    (identifier, api_domain),
-                )
-                count_proxies += 1
-                for endpoint, methods in entry.get("mocked_requests", {}).items():
-                    for method, response in methods.items():
-                        conn.execute(
-                            "INSERT OR IGNORE INTO mocks "
-                            "(proxy_id, endpoint, method, response) VALUES (?, ?, ?, ?)",
-                            (identifier, endpoint, method, json.dumps(response)),
-                        )
-                        count_mocks += 1
-            conn.commit()
-        finally:
-            conn.close()
-
-        backup = json_path + ".migrated"
-        os.rename(json_path, backup)
-        logger.info(
-            "[BOOTSTRAP] migrate_from_json ok proxies=%d mocks=%d backup=%s",
-            count_proxies, count_mocks, backup,
-        )
-    except Exception:
-        logger.exception("[BOOTSTRAP] migrate_from_json failed path=%s", json_path)
-        raise
-
-
 def main() -> int:
     init_db()
-    migrate_from_json(os.path.join(_BASE_DIR, "proxy_server.json"))
     return 0
 
 
