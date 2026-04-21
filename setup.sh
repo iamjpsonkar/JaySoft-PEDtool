@@ -9,6 +9,11 @@
 # Does not touch existing rows. Never drops tables. Always backs up the DB
 # before running bootstrap so a failed run can be rolled back.
 #
+# Prerequisites:
+#   - Python 3.9+
+#   - MongoDB running (local or Atlas URI in PED_MONGO_URI)
+#   - .env file present (copy from .env.example and fill in values)
+#
 # Usage:
 #   ./setup.sh              # full setup (default)
 #   ./setup.sh --no-venv    # use current python (skip venv create/activate)
@@ -39,6 +44,16 @@ done
 log() { printf '\033[1;34m[setup]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[setup]\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31m[setup]\033[0m %s\n' "$*" >&2; exit 1; }
+
+# -----------------------------------------------------------------------------
+# 0. Check .env exists
+# -----------------------------------------------------------------------------
+if [ ! -f ".env" ]; then
+    warn ".env file not found. Copy .env.example and fill in your values:"
+    warn "  cp .env.example .env && vi .env"
+    die "Aborting — .env is required."
+fi
+log ".env found"
 
 # -----------------------------------------------------------------------------
 # 1. Resolve Python interpreter (venv or system)
@@ -101,15 +116,15 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 5. Run bootstrap (idempotent: CREATE TABLE IF NOT EXISTS + one-shot JSON import)
+# 5. Run bootstrap (SQLite schema — idempotent)
 # -----------------------------------------------------------------------------
-log "Running bootstrap.py (init schema)"
+log "Running bootstrap.py (SQLite schema init)"
 "$PY" bootstrap.py
 
 # -----------------------------------------------------------------------------
-# 6. Verify schema — read-only sanity check before reporting success
+# 6. Verify SQLite schema
 # -----------------------------------------------------------------------------
-log "Verifying schema"
+log "Verifying SQLite schema"
 "$PY" - <<'PYEOF'
 import os, sqlite3, sys
 from pathlib import Path
@@ -119,7 +134,7 @@ try:
 except Exception:
     pass
 db = os.environ.get("PED_DB_PATH", "pedapp.db")
-required = {"proxies", "mocks", "request_history", "mock_sequences", "mock_state"}
+required = {"proxies", "mocks", "request_history", "mock_sequences"}
 conn = sqlite3.connect(db)
 try:
     present = {r[0] for r in conn.execute(
@@ -131,7 +146,36 @@ missing = required - present
 if missing:
     print(f"[setup] MISSING TABLES: {sorted(missing)}", file=sys.stderr)
     sys.exit(1)
-print(f"[setup] schema ok ({len(required)} required tables present) at {db}")
+print(f"[setup] SQLite ok — {len(present)} tables at {db}")
+PYEOF
+
+# -----------------------------------------------------------------------------
+# 7. Verify MongoDB connectivity
+# -----------------------------------------------------------------------------
+log "Checking MongoDB connectivity"
+"$PY" - <<'PYEOF'
+import os, sys
+from pathlib import Path
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path.cwd() / ".env")
+except Exception:
+    pass
+uri = os.environ.get("PED_MONGO_URI", "mongodb://localhost:27017")
+db_name = os.environ.get("PED_MONGO_DB", "pedapp")
+try:
+    from pymongo import MongoClient
+    from pymongo.errors import ServerSelectionTimeoutError
+    client = MongoClient(uri, serverSelectionTimeoutMS=4000)
+    client.admin.command("ping")
+    client.close()
+    print(f"[setup] MongoDB ok — uri={uri} db={db_name}")
+except ServerSelectionTimeoutError:
+    print(f"[setup] WARNING: Cannot reach MongoDB at {uri}", file=sys.stderr)
+    print(f"[setup]   Set PED_MONGO_URI in .env and ensure MongoDB is running.", file=sys.stderr)
+    print(f"[setup]   dbget() / _store will fail at runtime until Mongo is reachable.", file=sys.stderr)
+except Exception as e:
+    print(f"[setup] WARNING: MongoDB check failed: {e}", file=sys.stderr)
 PYEOF
 
 log "Done. Start the server with: ./run.sh  (or: $PY app.py)"
