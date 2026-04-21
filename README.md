@@ -35,7 +35,7 @@ A Flask-based HTTP proxy, mock server, and AES encryption utility with a full we
 | **URL-mirroring registration** | POST to `/mock/<id>/<path>` — no separate body needed |
 | **Conditional mocks** | Return different responses based on request body, headers, params, path, method, or snippet expression |
 | **Placeholder resolvers** | Dynamic values injected at request time: `jsonget`, `headerget`, `dbget`, `now()`, `snippet()`, and more |
-| **State management** | Per-proxy key-value store backed by MongoDB; readable and writable from mock responses |
+| **State management** | Per-proxy key-value store backed by SQLite; readable and writable from mock responses |
 | **Foreach / template expansion** | Build response arrays from request body fields |
 | **_store side-effects** | Persist request fields to state in the same response that returns a mock |
 | **Redirect mode** | Proxies ending in `_REDIRECT` bypass mock lookup and always forward upstream |
@@ -84,8 +84,8 @@ All configuration is via environment variables (loaded from `.env`).
 | `PED_SECRET_KEY` | **required in prod** | Flask session secret. Raises at startup unless `PED_DEBUG=true`. Generate: `python -c 'import secrets; print(secrets.token_hex(32))'` |
 | `PED_UI_PASSWORD` | _(empty)_ | Password for browser login. Empty disables UI auth |
 | `PED_API_TOKEN` | _(empty)_ | Bearer token for API auth. Empty disables API auth |
-| `PED_MONGO_URI` | `mongodb://localhost:27017` | MongoDB connection URI (for state + proxy users) |
-| `PED_MONGO_DB` | `pedapp` | MongoDB database name |
+| `PED_MONGO_URI` | `mongodb://localhost:27017` | MongoDB URI — **optional**, only used by `mongo_*` snippet helpers |
+| `PED_MONGO_DB` | `pedapp` | MongoDB database name — only relevant when `PED_MONGO_URI` is in use |
 | `PED_DEFAULT_SECRET` | — | Default AES key for encrypt/decrypt endpoints |
 | `PED_DEFAULT_ENC_IV` | — | Default AES IV (base64) for encrypt/decrypt endpoints |
 | `PED_ALLOWED_PROXY_DOMAINS` | _(empty)_ | Comma-separated allowed proxy target hostnames. Empty = allow all. Matching is exact-host or dot-boundary suffix |
@@ -233,7 +233,7 @@ PATCH  /proxy/state/<id>/    body: {key: value, ...}   (merge)
 DELETE /proxy/state/<id>/                              (clear all)
 ```
 
-State is stored in MongoDB (`proxy_state` collection). Used by `dbget()`, `_store` side-effects, and snippet functions.
+State is stored in SQLite (`proxy_state` table). Used by `dbget()`, `_store` side-effects, and snippet functions.
 
 ---
 
@@ -394,7 +394,7 @@ Standard Python builtins available: `abs`, `int`, `float`, `str`, `len`, `min`, 
 
 ## State Management
 
-Each proxy has a persistent key-value store in MongoDB (`proxy_state` collection).
+Each proxy has a persistent key-value store in SQLite (`proxy_state` table).
 
 **Read state:** `dbget(path)` resolver, `state_all()` snippet function, or `GET /proxy/state/<id>/`.
 
@@ -499,7 +499,7 @@ Store ops run before the response is built, so `dbget()` in the same response bo
 
 ## Proxy Users
 
-Per-proxy user credentials (stored in MongoDB `proxy_users` collection). Used by `verify_password()` and `valid_token()`/`token_user()` snippet functions to simulate auth flows.
+Per-proxy user credentials (stored in SQLite `proxy_users` table). Used by `verify_password()` and `valid_token()`/`token_user()` snippet functions to simulate auth flows.
 
 ```
 GET  /proxy/users/<id>/           list users (passwords excluded)
@@ -743,9 +743,10 @@ curl -X POST http://localhost:8000/proxy/history/payments/clear/ \
 The app resolves all paths relative to `app.py`, so it works out-of-the-box with PythonAnywhere WSGI.
 
 1. Upload project files.
-2. Point the WSGI config at `app.py`.
-3. Set environment variables (or keep `.env` beside `app.py`).
-4. Ensure `PED_SECRET_KEY` is set — the app refuses to start without it.
+2. Run `python bootstrap.py` once to create the SQLite schema.
+3. Point the WSGI config at `app.py`.
+4. Set environment variables (or keep `.env` beside `app.py`).
+5. Ensure `PED_SECRET_KEY` is set — the app refuses to start without it.
 
 ### Docker / general WSGI
 
@@ -755,7 +756,7 @@ Use any WSGI server (gunicorn, uWSGI). Example:
 gunicorn -w 4 -b 0.0.0.0:8000 'app:app'
 ```
 
-Ensure MongoDB is reachable if you use state, proxy users, or snippet MongoDB functions.
+State and proxy users are stored in SQLite — no external database required. MongoDB is optional and only needed if you use `mongo_*` snippet helpers.
 
 ---
 
