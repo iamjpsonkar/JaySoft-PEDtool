@@ -513,6 +513,35 @@ def _get_state_for_resolver(proxy_id: str | None) -> dict:
         return {}
 
 
+def mongo_get_any(collection: str, key: str, path: str | None = None, default=None):
+    """General-purpose MongoDB lookup across any collection in PED_MONGO_DB.
+
+    Looks up the document where ``proxy_id == key`` in ``collection``, then
+    traverses ``path`` (dotted) inside its ``data`` field.
+
+    mongoget(proxy_state, ajiocash, accessToken)     → token stored for ajiocash
+    mongoget(proxy_state, juspay, user.tier, guest)  → nested path with default
+    mongoget(sessions, sess_abc, expires)            → from a custom collection
+    """
+    try:
+        doc = _get_mongo()[MONGO_DB][collection].find_one(
+            {"proxy_id": key}, {"_id": 0, "data": 1}
+        )
+        if not doc:
+            logger.debug("[MONGOGET] no doc col=%s key=%s", collection, key)
+            return default
+        data = doc.get("data", {})
+        if not isinstance(data, dict):
+            return default
+        if path:
+            resolved, found = _resolve_item_path(data, path)
+            return resolved if found else default
+        return data
+    except PyMongoError as exc:
+        logger.warning("[MONGOGET] error col=%s key=%s path=%s: %s", collection, key, path, exc)
+        return default
+
+
 # ---------------------------------------------------------------------------
 # Rate Limiting (in-memory, thread-safe)
 # ---------------------------------------------------------------------------
@@ -1114,6 +1143,9 @@ def _snippet_context(header, json_data, params, url, proxy_id):
         v, ok = _resolve_item_path(_state, path)
         return v if ok else default
 
+    def _fn_mongoget(collection, key, path=None, default=None):
+        return mongo_get_any(collection, key, path, default)
+
     def _fn_headerget(name, default=None):
         return _header.get(name, default)
 
@@ -1178,8 +1210,9 @@ def _snippet_context(header, json_data, params, url, proxy_id):
             "headerget": _fn_headerget,
             "paramget": _fn_paramget,
             "pathparamget": _fn_pathparamget,
-            # State accessor
+            # State accessors
             "dbget": _fn_dbget,
+            "mongoget": _fn_mongoget,
             # Whole-payload accessors
             "body": _fn_body,
             "state_all": _fn_state_all,
@@ -1249,6 +1282,20 @@ def _resolve_value(value: str, header: dict, json_data: dict, params: dict,
         state = _get_state_for_resolver(proxy_id)
         resolved, found = _resolve_item_path(state, field)
         return resolved if found else default
+
+    # --- General MongoDB lookup: mongoget(collection, key, path, default) ---
+    if value.startswith("mongoget(") and value.endswith(")"):
+        raw = value[9:-1].strip()
+        # Split into up to 4 positional args respecting no nested parens
+        parts = [p.strip().strip("'\"") for p in raw.split(",")]
+        if len(parts) < 2:
+            logger.warning("[RESOLVER] mongoget() needs at least 2 args: %s", value)
+            return value
+        col = parts[0]
+        key = parts[1]
+        path = parts[2] if len(parts) > 2 else None
+        default = parts[3] if len(parts) > 3 else None
+        return mongo_get_any(col, key, path, default)
 
     # --- Generators (random) ---
     if value.startswith("alnum(") and value.endswith(")"):
