@@ -98,17 +98,83 @@ def _get_mongo() -> MongoClient:
     if _mongo_client is None:
         logger.info("[MONGO] Connecting to %s db=%s", MONGO_URI, MONGO_DB)
         _mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-        # Ensure index on proxy_id for fast lookups
-        _mongo_client[MONGO_DB]["proxy_state"].create_index(
+        db = _mongo_client[MONGO_DB]
+        db["proxy_state"].create_index(
             [("proxy_id", ASCENDING)], unique=True, background=True
+        )
+        db["proxy_users"].create_index(
+            [("proxy_id", ASCENDING), ("username", ASCENDING)],
+            unique=True, background=True,
         )
         logger.info("[MONGO] Client ready")
     return _mongo_client
 
 
 def _state_col():
-    """Shorthand: returns the proxy_state collection."""
     return _get_mongo()[MONGO_DB]["proxy_state"]
+
+
+def _users_col():
+    return _get_mongo()[MONGO_DB]["proxy_users"]
+
+
+# ---------------------------------------------------------------------------
+# User management helpers (proxy_users collection)
+# ---------------------------------------------------------------------------
+
+
+def create_proxy_user(proxy_id: str, username: str, password: str) -> None:
+    """Upsert a user credential for a proxy."""
+    try:
+        _users_col().update_one(
+            {"proxy_id": proxy_id, "username": username},
+            {"$set": {"password": password}},
+            upsert=True,
+        )
+        logger.info("[USERS] Upserted proxy='%s' username='%s'", proxy_id, username)
+    except PyMongoError as exc:
+        logger.error("[USERS] create_proxy_user error: %s", exc)
+        raise
+
+
+def list_proxy_users(proxy_id: str) -> list[dict]:
+    """Return all users for a proxy (password excluded)."""
+    try:
+        docs = _users_col().find({"proxy_id": proxy_id}, {"_id": 0, "password": 0})
+        return list(docs)
+    except PyMongoError as exc:
+        logger.error("[USERS] list_proxy_users error: %s", exc)
+        return []
+
+
+def delete_proxy_user(proxy_id: str, username: str) -> bool:
+    """Delete a user. Returns True if found and deleted."""
+    try:
+        result = _users_col().delete_one({"proxy_id": proxy_id, "username": username})
+        deleted = result.deleted_count > 0
+        if deleted:
+            logger.info("[USERS] Deleted proxy='%s' username='%s'", proxy_id, username)
+        return deleted
+    except PyMongoError as exc:
+        logger.error("[USERS] delete_proxy_user error: %s", exc)
+        raise
+
+
+def verify_proxy_user(proxy_id: str, username: str, password: str) -> bool:
+    """Return True if username+password match a stored credential."""
+    try:
+        doc = _users_col().find_one(
+            {"proxy_id": proxy_id, "username": username}, {"_id": 0, "password": 1}
+        )
+        if not doc:
+            logger.debug("[USERS] verify: no user proxy='%s' username='%s'", proxy_id, username)
+            return False
+        match = doc.get("password") == password
+        logger.debug("[USERS] verify: proxy='%s' username='%s' match=%s", proxy_id, username, match)
+        return match
+    except PyMongoError as exc:
+        logger.warning("[USERS] verify_proxy_user error: %s", exc)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1146,6 +1212,36 @@ def _snippet_context(header, json_data, params, url, proxy_id):
     def _fn_mongoget(collection, key, path=None, default=None):
         return mongo_get_any(collection, key, path, default)
 
+    def _fn_verify_password(username, password):
+        """Check username+password against proxy_users collection for this proxy."""
+        if not proxy_id:
+            return False
+        return verify_proxy_user(proxy_id, str(username), str(password))
+
+    def _fn_valid_token(token):
+        """Return True if token matches any stored accessToken in state.tokens.<user>."""
+        tokens = _state.get("tokens", {})
+        return any(
+            isinstance(v, dict) and v.get("accessToken") == str(token)
+            for v in tokens.values()
+        )
+
+    def _fn_valid_refresh_token(token):
+        """Return True if token matches any stored refreshToken in state.tokens.<user>."""
+        tokens = _state.get("tokens", {})
+        return any(
+            isinstance(v, dict) and v.get("refreshToken") == str(token)
+            for v in tokens.values()
+        )
+
+    def _fn_token_user(token):
+        """Return the username associated with the given accessToken, or None."""
+        tokens = _state.get("tokens", {})
+        for username, v in tokens.items():
+            if isinstance(v, dict) and v.get("accessToken") == str(token):
+                return username
+        return None
+
     def _fn_headerget(name, default=None):
         return _header.get(name, default)
 
@@ -1213,6 +1309,11 @@ def _snippet_context(header, json_data, params, url, proxy_id):
             # State accessors
             "dbget": _fn_dbget,
             "mongoget": _fn_mongoget,
+            # Auth helpers
+            "verify_password": _fn_verify_password,
+            "valid_token": _fn_valid_token,
+            "valid_refresh_token": _fn_valid_refresh_token,
+            "token_user": _fn_token_user,
             # Whole-payload accessors
             "body": _fn_body,
             "state_all": _fn_state_all,
@@ -1807,6 +1908,7 @@ def _check_conditions(
     params: dict,
     path: str | None = None,
     method: str | None = None,
+    proxy_id: str | None = None,
 ) -> bool:
     """Check if all conditions match.
 
@@ -1818,6 +1920,7 @@ def _check_conditions(
       param / query_param — query parameter
       path              — URL path ('field' ignored)
       method            — HTTP method ('field' ignored)
+      snippet           — evaluate 'value' as snippet expression; truthy = pass
 
     Supported operators:
       eq / equals, neq / not_equals, contains, exists, not_exists,
@@ -1839,6 +1942,25 @@ def _check_conditions(
         raw_op = cond.get("operator", "eq")
         operator = _OP_ALIASES.get(raw_op, raw_op)
         expected = cond.get("value")
+
+        # snippet source: evaluate value expression; truthy = condition passes
+        if source_type == "snippet":
+            expr = cond.get("value", "")
+            # strip outer snippet(...) wrapper if present
+            if expr.startswith("snippet(") and expr.endswith(")"):
+                expr = expr[8:-1]
+            try:
+                result = safe_eval_snippet(
+                    expr,
+                    **_snippet_context(headers, json_body, params, path or "", proxy_id),
+                )
+                if not result:
+                    logger.debug("[CONDITIONAL] snippet condition false: %r", expr)
+                    return False
+            except Exception as exc:
+                logger.warning("[CONDITIONAL] snippet condition error %r: %s", expr, exc)
+                return False
+            continue
 
         if source_type == "header":
             actual = headers.get(field)
@@ -2425,6 +2547,45 @@ def clear_proxy_state(identifier):
 
 
 # ---------------------------------------------------------------------------
+# Routes — User Management (proxy_users collection)
+# ---------------------------------------------------------------------------
+
+
+@app.route("/proxy/users/<identifier>/", methods=["GET"])
+@require_auth
+def get_proxy_users(identifier: str):
+    """List all users for a proxy (passwords excluded)."""
+    users = list_proxy_users(identifier)
+    logger.info("[USERS] Listed proxy='%s' count=%d", identifier, len(users))
+    return jsonify({"proxy_id": identifier, "users": users})
+
+
+@app.route("/proxy/users/<identifier>/", methods=["POST"])
+@require_auth
+def upsert_proxy_user(identifier: str):
+    """Create or update a user credential."""
+    data = request.get_json(silent=True) or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
+    if not username:
+        return jsonify({"error": "username is required"}), 400
+    if not password:
+        return jsonify({"error": "password is required"}), 400
+    create_proxy_user(identifier, username, password)
+    return jsonify({"proxy_id": identifier, "username": username, "status": "ok"})
+
+
+@app.route("/proxy/users/<identifier>/<username>/", methods=["DELETE"])
+@require_auth
+def remove_proxy_user(identifier: str, username: str):
+    """Delete a user credential."""
+    deleted = delete_proxy_user(identifier, username)
+    if not deleted:
+        return jsonify({"error": "user not found"}), 404
+    return jsonify({"proxy_id": identifier, "username": username, "status": "deleted"})
+
+
+# ---------------------------------------------------------------------------
 # Routes — Proxy Passthrough
 # ---------------------------------------------------------------------------
 
@@ -2597,7 +2758,7 @@ def proxy_request(identifier, endpoint):
                 selected = None
                 for case in mock_data_copy["responses"]:
                     case_conditions = case.get("when", [])
-                    if _check_conditions(case_conditions, headers, json_body, params, path=endpoint, method=method):
+                    if _check_conditions(case_conditions, headers, json_body, params, path=endpoint, method=method, proxy_id=identifier):
                         selected = case.get("then", {})
                         logger.info("[CONDITIONAL] Matched condition: %s", case_conditions)
                         break
