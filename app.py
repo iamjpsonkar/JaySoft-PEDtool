@@ -31,6 +31,8 @@ from simpleeval import EvalWithCompoundTypes
 
 import requests as http_requests
 import shortuuid
+from pymongo import MongoClient, ASCENDING
+from pymongo.errors import PyMongoError
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +40,8 @@ import shortuuid
 # ---------------------------------------------------------------------------
 
 DB_PATH = os.environ.get("PED_DB_PATH", os.path.join(_BASE_DIR, "pedapp.db"))
+MONGO_URI = os.environ.get("PED_MONGO_URI", "mongodb://localhost:27017")
+MONGO_DB = os.environ.get("PED_MONGO_DB", "pedapp")
 DEFAULT_ENC_IV = os.environ.get("PED_DEFAULT_ENC_IV", "")
 DEFAULT_SECRET = os.environ.get("PED_DEFAULT_SECRET", "")
 API_TOKEN = os.environ.get("PED_API_TOKEN", "")
@@ -83,6 +87,31 @@ if app.secret_key == _SECRET_KEY_DEV_FALLBACK:
 
 
 # ---------------------------------------------------------------------------
+# MongoDB client (per-proxy state only)
+# ---------------------------------------------------------------------------
+
+_mongo_client: MongoClient | None = None
+
+
+def _get_mongo() -> MongoClient:
+    global _mongo_client
+    if _mongo_client is None:
+        logger.info("[MONGO] Connecting to %s db=%s", MONGO_URI, MONGO_DB)
+        _mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+        # Ensure index on proxy_id for fast lookups
+        _mongo_client[MONGO_DB]["proxy_state"].create_index(
+            [("proxy_id", ASCENDING)], unique=True, background=True
+        )
+        logger.info("[MONGO] Client ready")
+    return _mongo_client
+
+
+def _state_col():
+    """Shorthand: returns the proxy_state collection."""
+    return _get_mongo()[MONGO_DB]["proxy_state"]
+
+
+# ---------------------------------------------------------------------------
 # SQLite storage
 # ---------------------------------------------------------------------------
 
@@ -110,7 +139,7 @@ def _ensure_schema_ready() -> None:
     Run `python bootstrap.py` (or `./run.sh`, which calls it) before starting
     the app. This keeps first-time setup out of import-time side effects.
     """
-    must_exist = ("proxies", "mocks", "request_history", "mock_sequences", "mock_state")
+    must_exist = ("proxies", "mocks", "request_history", "mock_sequences")
     try:
         conn = sqlite3.connect(DB_PATH)
         try:
@@ -413,73 +442,74 @@ def db_reset_sequence(proxy_id: str, endpoint: str | None = None) -> int:
 
 
 # ---------------------------------------------------------------------------
-# DB helper functions — Per-proxy State (for dbget resolver)
+# MongoDB helper functions — Per-proxy State (for dbget resolver)
 # ---------------------------------------------------------------------------
 
 
 def db_get_state(proxy_id: str) -> dict:
-    """Return the per-proxy state dict, or {} if none stored."""
-    db = _get_db()
-    row = db.execute(
-        "SELECT data FROM mock_state WHERE proxy_id = ?", (proxy_id,)
-    ).fetchone()
-    if not row:
-        return {}
+    """Return the per-proxy state dict from MongoDB, or {} if none stored."""
     try:
-        parsed = json.loads(row["data"])
-        return parsed if isinstance(parsed, dict) else {}
-    except (json.JSONDecodeError, TypeError):
-        logger.warning("[STATE] Corrupt JSON for proxy '%s' — returning {}", proxy_id)
+        doc = _state_col().find_one({"proxy_id": proxy_id}, {"_id": 0, "data": 1})
+        if not doc:
+            return {}
+        data = doc.get("data", {})
+        return data if isinstance(data, dict) else {}
+    except PyMongoError as exc:
+        logger.warning("[STATE] db_get_state error proxy='%s': %s", proxy_id, exc)
         return {}
 
 
 def db_set_state(proxy_id: str, data: dict) -> None:
-    """Replace the per-proxy state with `data`."""
-    db = _get_db()
-    db.execute(
-        "INSERT INTO mock_state (proxy_id, data) VALUES (?, ?) "
-        "ON CONFLICT(proxy_id) DO UPDATE SET "
-        "data = excluded.data, updated_at = datetime('now')",
-        (proxy_id, json.dumps(data)),
-    )
-    db.commit()
-    logger.info("[STATE] Replaced for proxy '%s' (%d top-level keys)", proxy_id, len(data))
+    """Replace the per-proxy state in MongoDB."""
+    try:
+        _state_col().update_one(
+            {"proxy_id": proxy_id},
+            {"$set": {"data": data}},
+            upsert=True,
+        )
+        logger.info("[STATE] Replaced proxy='%s' keys=%d", proxy_id, len(data))
+    except PyMongoError as exc:
+        logger.error("[STATE] db_set_state error proxy='%s': %s", proxy_id, exc)
+        raise
 
 
 def db_merge_state(proxy_id: str, patch: dict) -> dict:
-    """Shallow-merge `patch` into the per-proxy state. Returns the merged result.
-
-    Race-safe within a single SQLite process via the immediate-transaction
-    semantics; concurrent callers still race across read/write — last writer
-    wins at the key level.
-    """
-    current = db_get_state(proxy_id)
-    merged = {**current, **patch}
-    db_set_state(proxy_id, merged)
-    return merged
+    """Shallow-merge `patch` into the per-proxy state using $set. Returns merged result."""
+    try:
+        _state_col().update_one(
+            {"proxy_id": proxy_id},
+            {"$set": {f"data.{k}": v for k, v in patch.items()}},
+            upsert=True,
+        )
+        merged = db_get_state(proxy_id)
+        logger.info("[STATE] Merged proxy='%s' patch_keys=%s", proxy_id, list(patch))
+        return merged
+    except PyMongoError as exc:
+        logger.error("[STATE] db_merge_state error proxy='%s': %s", proxy_id, exc)
+        raise
 
 
 def db_clear_state(proxy_id: str) -> bool:
-    """Drop the per-proxy state row. Returns True if something was deleted."""
-    db = _get_db()
-    cursor = db.execute(
-        "DELETE FROM mock_state WHERE proxy_id = ?", (proxy_id,)
-    )
-    db.commit()
-    if cursor.rowcount > 0:
-        logger.info("[STATE] Cleared for proxy '%s'", proxy_id)
-    return cursor.rowcount > 0
+    """Delete the per-proxy state document. Returns True if something was deleted."""
+    try:
+        result = _state_col().delete_one({"proxy_id": proxy_id})
+        deleted = result.deleted_count > 0
+        if deleted:
+            logger.info("[STATE] Cleared proxy='%s'", proxy_id)
+        return deleted
+    except PyMongoError as exc:
+        logger.error("[STATE] db_clear_state error proxy='%s': %s", proxy_id, exc)
+        raise
 
 
 def _get_state_for_resolver(proxy_id: str | None) -> dict:
-    """dbget() fetch helper. Robust to being called outside a Flask request
-    context (e.g. unit tests) — returns {} rather than raising."""
+    """dbget() fetch helper. Returns {} on any error — never raises."""
     if not proxy_id:
         return {}
     try:
         return db_get_state(proxy_id)
-    except (RuntimeError, sqlite3.Error) as exc:
-        logger.debug("[STATE] dbget: no DB context (%s)", exc)
+    except Exception as exc:
+        logger.debug("[STATE] dbget resolver fallback proxy='%s': %s", proxy_id, exc)
         return {}
 
 
