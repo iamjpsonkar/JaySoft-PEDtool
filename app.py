@@ -28,6 +28,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 from flask import Flask, Response, g, jsonify, redirect, render_template, request, session, url_for
 from simpleeval import EvalWithCompoundTypes
+from werkzeug.exceptions import HTTPException
 
 import requests as http_requests
 import shortuuid
@@ -68,6 +69,17 @@ if not _secret_key:
 
 app = Flask(__name__)
 app.secret_key = _secret_key
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=1)
+
+
+@app.after_request
+def _set_security_headers(response):
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return response
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -100,11 +112,11 @@ def _get_mongo() -> MongoClient:
         _mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
         db = _mongo_client[MONGO_DB]
         db["proxy_state"].create_index(
-            [("proxy_id", ASCENDING)], unique=True, background=True
+            [("proxy_id", ASCENDING)], unique=True
         )
         db["proxy_users"].create_index(
             [("proxy_id", ASCENDING), ("username", ASCENDING)],
-            unique=True, background=True,
+            unique=True,
         )
         logger.info("[MONGO] Client ready")
     return _mongo_client
@@ -918,9 +930,9 @@ _ESCAPE_REPLACEMENTS = [
 ]
 
 _PYTHON_LITERAL_MAP = [
-    ("True", "true"),
-    ("False", "false"),
-    ("None", "null"),
+    (re.compile(r'\bTrue\b'), "true"),
+    (re.compile(r'\bFalse\b'), "false"),
+    (re.compile(r'\bNone\b'), "null"),
 ]
 
 
@@ -929,8 +941,8 @@ def normalize_escape_sequences(s: str) -> str:
         return s
     for old, new in _ESCAPE_REPLACEMENTS:
         s = s.replace(old, new)
-    for old, new in _PYTHON_LITERAL_MAP:
-        s = s.replace(old, new)
+    for pattern, new in _PYTHON_LITERAL_MAP:
+        s = pattern.sub(new, s)
     s = s.replace("'", '"')
     return s
 
@@ -1023,7 +1035,7 @@ class API:
         if not raw:
             return None
         if 'application/json' in self.content_type:
-            return {'json': flask_request.json or {}}
+            return {'json': flask_request.get_json(silent=True) or {}}
         if 'application/x-www-form-urlencoded' in self.content_type:
             return {'data': flask_request.form.to_dict()}
         if 'multipart/form-data' in self.content_type:
@@ -1339,7 +1351,7 @@ def _snippet_context(header, json_data, params, url, proxy_id):
 
     def _fn_valid_refresh_token(token):
         """Return True if token matches any stored refreshToken in state.tokens.<user>."""
-        tokens = _get_state_for_resolver(proxy_id).get("tokens", {})
+        tokens = _state.get("tokens", {})
         return any(
             isinstance(v, dict) and v.get("refreshToken") == str(token)
             for v in tokens.values()
@@ -1347,7 +1359,7 @@ def _snippet_context(header, json_data, params, url, proxy_id):
 
     def _fn_token_user(token):
         """Return the username associated with the given accessToken, or None."""
-        tokens = _get_state_for_resolver(proxy_id).get("tokens", {})
+        tokens = _state.get("tokens", {})
         for username, v in tokens.items():
             if isinstance(v, dict) and v.get("accessToken") == str(token):
                 return username
@@ -1355,7 +1367,7 @@ def _snippet_context(header, json_data, params, url, proxy_id):
 
     def _fn_refresh_token_user(token):
         """Return the username associated with the given refreshToken, or None."""
-        tokens = _get_state_for_resolver(proxy_id).get("tokens", {})
+        tokens = _state.get("tokens", {})
         for username, v in tokens.items():
             if isinstance(v, dict) and v.get("refreshToken") == str(token):
                 return username
@@ -2178,6 +2190,21 @@ def login_page():
         return redirect(url_for("index"))
 
     if request.method == "POST":
+        # Brute-force protection: max 10 attempts per IP per 60 seconds
+        _login_key = f"__login__:{request.remote_addr}"
+        _login_window = 60
+        _login_max = 10
+        _now = time.time()
+        with _rate_lock:
+            _ts = _rate_limits.get(_login_key, [])
+            _ts = [t for t in _ts if t > _now - _login_window]
+            if len(_ts) >= _login_max:
+                _rate_limits[_login_key] = _ts
+                logger.warning("[AUTH] Login rate limit hit from %s", request.remote_addr)
+                return render_template("login.html", error="Too many attempts. Try again later."), 429
+            _ts.append(_now)
+            _rate_limits[_login_key] = _ts
+
         password = request.form.get("password", "")
         # Accept UI_PASSWORD or API_TOKEN as valid password
         valid = False
@@ -2189,6 +2216,10 @@ def login_page():
             session["authenticated"] = True
             session.permanent = True
             next_url = request.args.get("next", "/")
+            # Reject absolute URLs to prevent open redirect
+            if next_url and (next_url.startswith("//") or "://" in next_url):
+                logger.warning("[AUTH] Rejected suspicious next_url=%s from %s", next_url, request.remote_addr)
+                next_url = "/"
             logger.info("[AUTH] Login successful from %s", request.remote_addr)
             return redirect(next_url)
         else:
@@ -2343,6 +2374,9 @@ def create_proxy():
         return jsonify({"error": "Request body must be JSON"}), 400
     api_domain = request_data.get("api_domain", "")
 
+    if not api_domain:
+        return jsonify({"error": "api_domain is required"}), 400
+
     if not _is_domain_allowed(api_domain):
         return jsonify({"error": "Domain not in allowlist"}), 403
 
@@ -2371,7 +2405,11 @@ def create_mock_proxy():
         return jsonify({"error": "proxy_identifier, end_point, and method are required"}), 400
 
     if isinstance(new_mock, str):
-        new_mock = json.loads(new_mock)
+        try:
+            new_mock = json.loads(new_mock)
+        except json.JSONDecodeError as exc:
+            logger.warning("[MOCK CREATE] Invalid JSON in mock body: %s", exc)
+            return jsonify({"error": f"mock field is not valid JSON: {exc}"}), 400
 
     old_mock = db_upsert_mock(proxy_identifier, end_point, method, new_mock)
     if old_mock is None and not db_get_proxy(proxy_identifier):
@@ -2694,6 +2732,7 @@ def clear_proxy_state(identifier):
 
 @app.route("/proxy/users/<identifier>/", methods=["GET"])
 @require_auth
+@log_access
 def get_proxy_users(identifier: str):
     """List all users for a proxy (passwords excluded)."""
     users = list_proxy_users(identifier)
@@ -2703,6 +2742,7 @@ def get_proxy_users(identifier: str):
 
 @app.route("/proxy/users/<identifier>/", methods=["POST"])
 @require_auth
+@log_access
 def upsert_proxy_user(identifier: str):
     """Create or update a user credential."""
     data = request.get_json(silent=True) or {}
@@ -2857,15 +2897,14 @@ def proxy_request(identifier, endpoint):
         if identifier.endswith("_REDIRECT"):
             if not _is_domain_allowed(api_domain):
                 return jsonify({"error": "Redirect target domain not allowed"}), 403
-            target_url = api_url
-            if request.query_string:
-                target_url += f"?{request.query_string.decode()}"
+            # API.__init__ captures flask_request.args as self.params; do NOT also
+            # append the query string to the URL or requests will duplicate it.
             try:
-                fwd_api = API(request, target_url)
+                fwd_api = API(request, api_url)
                 flask_resp, duration_ms, raw_resp = fwd_api.forward()
                 db_log_request(
                     identifier, endpoint, method, req_headers, req_body, query_string,
-                    raw_resp.status_code, raw_resp.text[:2000], "redirect", duration_ms,
+                    raw_resp.status_code, raw_resp.content[:2000].decode("utf-8", errors="replace"), "redirect", duration_ms,
                 )
                 return flask_resp
             except http_requests.exceptions.RequestException as exc:
@@ -2928,6 +2967,10 @@ def proxy_request(identifier, endpoint):
                 delay_raw, 0, headers, json_body, params, api_url, "DELAY",
                 proxy_id=identifier,
             )
+            _MAX_DELAY_MS = 30_000
+            if delay_ms > _MAX_DELAY_MS:
+                logger.warning("[DELAY] Clamping delay from %dms to %dms", delay_ms, _MAX_DELAY_MS)
+                delay_ms = _MAX_DELAY_MS
             if delay_ms > 0:
                 logger.info("[DELAY] Sleeping %dms before responding", delay_ms)
                 time.sleep(delay_ms / 1000.0)
@@ -2980,7 +3023,7 @@ def proxy_request(identifier, endpoint):
             flask_resp, duration_ms, raw_resp = api.forward()
             db_log_request(
                 identifier, endpoint, method, req_headers, req_body, query_string,
-                raw_resp.status_code, raw_resp.text[:2000], "forward", duration_ms,
+                raw_resp.status_code, raw_resp.content[:2000].decode("utf-8", errors="replace"), "forward", duration_ms,
             )
             return flask_resp
         except http_requests.exceptions.Timeout:
@@ -3026,9 +3069,6 @@ def proxy_manage_page():
 # ---------------------------------------------------------------------------
 # Error handler
 # ---------------------------------------------------------------------------
-
-
-from werkzeug.exceptions import HTTPException
 
 
 @app.errorhandler(Exception)

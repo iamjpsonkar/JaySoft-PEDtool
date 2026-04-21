@@ -594,7 +594,7 @@ function renderMocksTable(mocks) {
         var preview = JSON.stringify(e.body);
         if (preview.length > 100) preview = preview.substring(0, 100) + '...';
         html += '<tr id="mock-row-' + idx + '">' +
-            '<td><span class="method-badge method-' + e.method + '">' + e.method + '</span></td>' +
+            '<td><span class="method-badge method-' + escapeAttr(e.method) + '">' + escapeHtml(e.method) + '</span></td>' +
             '<td style="font-family:var(--mono);font-size:0.82rem;">' + escapeHtml(e.endpoint) + '</td>' +
             '<td class="mock-preview">' + escapeHtml(preview) + '</td>' +
             '<td style="white-space:nowrap;">' +
