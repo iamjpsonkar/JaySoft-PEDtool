@@ -178,6 +178,105 @@ def verify_proxy_user(proxy_id: str, username: str, password: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Raw query helpers — MongoDB + SQLite
+# ---------------------------------------------------------------------------
+
+
+def _clean_mongo_doc(doc: dict) -> dict:
+    """Remove non-serialisable fields (ObjectId) from a Mongo document."""
+    return {k: v for k, v in doc.items() if k != "_id"}
+
+
+def raw_mongo_find(collection: str, query: dict, projection: dict | None = None,
+                   limit: int = 100) -> list[dict]:
+    """Execute a MongoDB find and return a list of plain dicts."""
+    try:
+        proj = {**(projection or {}), "_id": 0}
+        cursor = _get_mongo()[MONGO_DB][collection].find(query, proj).limit(limit)
+        results = [_clean_mongo_doc(d) for d in cursor]
+        logger.debug("[MONGO_QUERY] find col=%s query=%s rows=%d", collection, query, len(results))
+        return results
+    except PyMongoError as exc:
+        logger.warning("[MONGO_QUERY] find error col=%s: %s", collection, exc)
+        return []
+
+
+def raw_mongo_find_one(collection: str, query: dict,
+                       projection: dict | None = None) -> dict | None:
+    """Execute a MongoDB find_one and return a plain dict or None."""
+    try:
+        proj = {**(projection or {}), "_id": 0}
+        doc = _get_mongo()[MONGO_DB][collection].find_one(query, proj)
+        result = _clean_mongo_doc(doc) if doc else None
+        logger.debug("[MONGO_QUERY] find_one col=%s query=%s found=%s", collection, query, result is not None)
+        return result
+    except PyMongoError as exc:
+        logger.warning("[MONGO_QUERY] find_one error col=%s: %s", collection, exc)
+        return None
+
+
+def raw_mongo_count(collection: str, query: dict) -> int:
+    """Return document count matching query."""
+    try:
+        count = _get_mongo()[MONGO_DB][collection].count_documents(query)
+        logger.debug("[MONGO_QUERY] count col=%s query=%s count=%d", collection, query, count)
+        return count
+    except PyMongoError as exc:
+        logger.warning("[MONGO_QUERY] count error col=%s: %s", collection, exc)
+        return 0
+
+
+def raw_mongo_aggregate(collection: str, pipeline: list) -> list[dict]:
+    """Execute a MongoDB aggregation pipeline and return results."""
+    try:
+        cursor = _get_mongo()[MONGO_DB][collection].aggregate(pipeline)
+        results = [_clean_mongo_doc(d) for d in cursor]
+        logger.debug("[MONGO_QUERY] aggregate col=%s stages=%d rows=%d",
+                     collection, len(pipeline), len(results))
+        return results
+    except PyMongoError as exc:
+        logger.warning("[MONGO_QUERY] aggregate error col=%s: %s", collection, exc)
+        return []
+
+
+def raw_sql_query(query: str, params: tuple = ()) -> list[dict]:
+    """Execute a raw SQLite SELECT and return a list of row dicts.
+
+    Only SELECT statements are allowed; write operations raise ValueError.
+    """
+    normalised = query.strip().upper()
+    if not normalised.startswith("SELECT"):
+        raise ValueError(f"raw_sql_query only allows SELECT; got: {query[:40]!r}")
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(query, params).fetchall()
+            results = [dict(r) for r in rows]
+        finally:
+            conn.close()
+        logger.debug("[SQL_QUERY] query=%s params=%s rows=%d", query[:80], params, len(results))
+        return results
+    except sqlite3.Error as exc:
+        logger.warning("[SQL_QUERY] error query=%s: %s", query[:80], exc)
+        return []
+
+
+def raw_sql_one(query: str, params: tuple = ()) -> dict | None:
+    """Execute a raw SQLite SELECT and return first row as dict or None."""
+    rows = raw_sql_query(query, params)
+    return rows[0] if rows else None
+
+
+def raw_sql_count(query: str, params: tuple = ()) -> int:
+    """Execute a COUNT query and return the integer result."""
+    row = raw_sql_one(query, params)
+    if not row:
+        return 0
+    return int(next(iter(row.values()), 0))
+
+
+# ---------------------------------------------------------------------------
 # SQLite storage
 # ---------------------------------------------------------------------------
 
@@ -1314,6 +1413,15 @@ def _snippet_context(header, json_data, params, url, proxy_id):
             "valid_token": _fn_valid_token,
             "valid_refresh_token": _fn_valid_refresh_token,
             "token_user": _fn_token_user,
+            # Raw MongoDB queries
+            "mongo_find": lambda col, q, proj=None, limit=100: raw_mongo_find(col, q, proj, limit),
+            "mongo_one": lambda col, q, proj=None: raw_mongo_find_one(col, q, proj),
+            "mongo_count": lambda col, q: raw_mongo_count(col, q),
+            "mongo_aggregate": lambda col, pipeline: raw_mongo_aggregate(col, pipeline),
+            # Raw SQLite queries (SELECT only)
+            "sql": lambda q, *params: raw_sql_query(q, params),
+            "sql_one": lambda q, *params: raw_sql_one(q, params),
+            "sql_count": lambda q, *params: raw_sql_count(q, params),
             # Whole-payload accessors
             "body": _fn_body,
             "state_all": _fn_state_all,
