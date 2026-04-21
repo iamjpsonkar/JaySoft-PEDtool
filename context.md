@@ -501,6 +501,58 @@ Common log prefixes:
 
 ---
 
+### 2026-04-21 — Proxy export redesign with MongoDB state integration
+
+**File added:** `improved_proxies.json`
+
+A fully redesigned 14-proxy export replacing the original flat-mock patterns with MongoDB state integration (`_store` / `dbget`). Key changes per proxy:
+
+**ajiocashwallet**
+- Login stores `tokens.<username>.accessToken` + `tokens.<username>.refreshToken` via `alnum(16,16)` in `_store`
+- Refresh validates via `valid_refresh_token(jsonget('refreshToken'))` snippet condition, rotates both tokens
+- Payments stores transaction under `transactions.<lastTxnId>` using staged `lastId` variable pattern
+- transactionStatus / refundTransactionStatus look up stored entries; return 404 if not found
+- undoPayments updates `transactions.<txnId>.status` to REVERSED
+- cartBenefit reads configurable benefit amounts from state
+
+**deadlock (Razorpay)**
+- POST /v1/orders stores order under `orders.<lastOrderId>` and returns dynamic ID via `dbget`
+- GET /v1/orders/<order_id> looks up stored order; returns 404 if not found
+- GET /v1/orders/<order_id>/payments returns payment with dynamic `pay_*` ID via `snippet('pay_' + upper(14))`
+- Fixed 20+ broken `snippet(return/import ...)` expressions (simpleeval supports expressions only)
+- Fixed duplicate Razorpay customer token IDs and expired `expired_at` timestamps (updated to 2027)
+
+**jioprimewallet**
+- `getActualPoint` returns live `snippet(dbget('points.balance', 1500))`
+- `redeemActivePoints` validates balance ≥ requested amount via snippet condition; deducts on success; 422 with available balance on failure
+- `addActivePoints` adds to balance, returns new total
+
+**mahacashback** — Same balance tracking pattern as jioprimewallet
+
+**pinelabs**
+- `UploadBilledTransaction` generates `digit(7)` reference, stores under `transactions.<ref>`, returns as `PlutusTransactionReferenceID`
+- `GetCloudBasedTxnStatus` looks up by `PlutusTransactionReferenceID`; returns 404 if not found
+- `CancelTransaction` updates stored status to CANCELLED
+
+**Other proxies** (personal, test, gokwik, jiocinema, kotak, paymentpayload, paymentpayloadupi, ixigo):
+- Removed real phone numbers from personal proxy
+- Fixed all broken `snippet(return ...)` patterns in test proxy
+- Retained existing flat-mock structure where state management was not applicable
+
+**State seeding required** for stateful proxies before first use:
+```
+PUT /proxy/state/ajiocashwallet/   {"tokens": {}, "transactions": {}}
+PUT /proxy/state/deadlock/         {"orders": {}}
+PUT /proxy/state/jioprimewallet/   {"points": {"balance": 1500}}
+PUT /proxy/state/mahacashback/     {"cashback": {"balance": 5000}}
+PUT /proxy/state/pinelabs/         {"transactions": {}}
+```
+
+**`lastId` staging pattern** (established in this redesign):
+In `_store` ops, write the generated ID to a temporary key first (e.g., `lastOrderId`), then subsequent ops in the same batch read it via `_store_pending_state.entry` (exposed as `dbget('lastOrderId')` in resolver context) to build the full nested key for the actual record.
+
+---
+
 ## 24. How to Update This File
 
 After any code change that affects:
