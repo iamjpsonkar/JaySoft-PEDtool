@@ -668,14 +668,26 @@ def db_clear_state(proxy_id: str) -> bool:
 
 
 def _get_state_for_resolver(proxy_id: str | None) -> dict:
-    """dbget() fetch helper. Returns {} on any error — never raises."""
+    """dbget() fetch helper. Returns {} on any error — never raises.
+
+    When called from inside _apply_store_ops, returns the in-progress local
+    state (thread-local) so sequential _store ops can see each other's writes.
+    """
     if not proxy_id:
         return {}
+    # Thread-local override set by _apply_store_ops for cross-op visibility
+    pending = getattr(_store_pending_state, "entry", None)
+    if pending is not None and pending.get("proxy_id") == proxy_id:
+        return pending["state"]
     try:
         return db_get_state(proxy_id)
     except Exception as exc:
         logger.debug("[STATE] dbget resolver fallback proxy='%s': %s", proxy_id, exc)
         return {}
+
+
+# Thread-local used by _apply_store_ops so each op sees previous ops' writes.
+_store_pending_state = threading.local()
 
 
 def mongo_get_any(collection: str, key: str, path: str | None = None, default=None):
@@ -1327,7 +1339,7 @@ def _snippet_context(header, json_data, params, url, proxy_id):
 
     def _fn_valid_refresh_token(token):
         """Return True if token matches any stored refreshToken in state.tokens.<user>."""
-        tokens = _state.get("tokens", {})
+        tokens = _get_state_for_resolver(proxy_id).get("tokens", {})
         return any(
             isinstance(v, dict) and v.get("refreshToken") == str(token)
             for v in tokens.values()
@@ -1335,11 +1347,24 @@ def _snippet_context(header, json_data, params, url, proxy_id):
 
     def _fn_token_user(token):
         """Return the username associated with the given accessToken, or None."""
-        tokens = _state.get("tokens", {})
+        tokens = _get_state_for_resolver(proxy_id).get("tokens", {})
         for username, v in tokens.items():
             if isinstance(v, dict) and v.get("accessToken") == str(token):
                 return username
         return None
+
+    def _fn_refresh_token_user(token):
+        """Return the username associated with the given refreshToken, or None."""
+        tokens = _get_state_for_resolver(proxy_id).get("tokens", {})
+        for username, v in tokens.items():
+            if isinstance(v, dict) and v.get("refreshToken") == str(token):
+                return username
+        return None
+
+    def _fn_bearer_token():
+        """Extract the token from 'Authorization: Bearer <token>' header."""
+        auth = _header.get("Authorization") or _header.get("authorization") or ""
+        return auth[7:] if auth.startswith("Bearer ") else auth
 
     def _fn_headerget(name, default=None):
         return _header.get(name, default)
@@ -1413,6 +1438,8 @@ def _snippet_context(header, json_data, params, url, proxy_id):
             "valid_token": _fn_valid_token,
             "valid_refresh_token": _fn_valid_refresh_token,
             "token_user": _fn_token_user,
+            "refresh_token_user": _fn_refresh_token_user,
+            "bearer_token": _fn_bearer_token,
             # Raw MongoDB queries
             "mongo_find": lambda col, q, proj=None, limit=100: raw_mongo_find(col, q, proj, limit),
             "mongo_one": lambda col, q, proj=None: raw_mongo_find_one(col, q, proj),
@@ -1622,50 +1649,56 @@ def _apply_store_ops(ops, proxy_id, header, json_body, params, url):
         return
 
     state = db_get_state(proxy_id)
+    # Expose in-progress state so sequential ops can read each other's writes
+    # via dbget() without waiting for the final db_set_state commit.
+    _store_pending_state.entry = {"proxy_id": proxy_id, "state": state}
     dirty = False
-    for op in ops:
-        if not isinstance(op, dict):
-            continue
-        if "collection" in op and "key" in op:
-            col = op["collection"]
-            key = op["key"]
-            col_r = (
-                _resolve_value(col, header, json_body, params, url, proxy_id)
-                if isinstance(col, str) else col
-            )
-            key_r = (
-                _resolve_value(key, header, json_body, params, url, proxy_id)
-                if isinstance(key, str) else key
-            )
-            path = f"{col_r}.{key_r}"
-        elif "path" in op:
-            tmpl = op["path"]
-            if not isinstance(tmpl, str):
+    try:
+        for op in ops:
+            if not isinstance(op, dict):
                 continue
-            path = _resolve_path_template(tmpl, header, json_body, params, url, proxy_id)
-        else:
-            logger.warning("[STORE] op missing collection/key or path: %r", op)
-            continue
-
-        if op.get("delete"):
-            if _delete_item_path(state, path):
-                dirty = True
-                logger.info("[STORE] delete path=%r", path)
-        else:
-            raw = op.get("value")
-            if isinstance(raw, str):
-                resolved_value = _resolve_value(raw, header, json_body, params, url, proxy_id)
-            elif isinstance(raw, (dict, list)):
-                resolved_value = resolve_mock_data(
-                    copy.deepcopy(raw),
-                    header=header, json_body=json_body, params=params,
-                    url=url, proxy_id=proxy_id,
+            if "collection" in op and "key" in op:
+                col = op["collection"]
+                key = op["key"]
+                col_r = (
+                    _resolve_value(col, header, json_body, params, url, proxy_id)
+                    if isinstance(col, str) else col
                 )
+                key_r = (
+                    _resolve_value(key, header, json_body, params, url, proxy_id)
+                    if isinstance(key, str) else key
+                )
+                path = f"{col_r}.{key_r}"
+            elif "path" in op:
+                tmpl = op["path"]
+                if not isinstance(tmpl, str):
+                    continue
+                path = _resolve_path_template(tmpl, header, json_body, params, url, proxy_id)
             else:
-                resolved_value = raw
-            _set_item_path(state, path, resolved_value)
-            dirty = True
-            logger.info("[STORE] set path=%r", path)
+                logger.warning("[STORE] op missing collection/key or path: %r", op)
+                continue
+
+            if op.get("delete"):
+                if _delete_item_path(state, path):
+                    dirty = True
+                    logger.info("[STORE] delete path=%r", path)
+            else:
+                raw = op.get("value")
+                if isinstance(raw, str):
+                    resolved_value = _resolve_value(raw, header, json_body, params, url, proxy_id)
+                elif isinstance(raw, (dict, list)):
+                    resolved_value = resolve_mock_data(
+                        copy.deepcopy(raw),
+                        header=header, json_body=json_body, params=params,
+                        url=url, proxy_id=proxy_id,
+                    )
+                else:
+                    resolved_value = raw
+                _set_item_path(state, path, resolved_value)
+                dirty = True
+                logger.info("[STORE] set path=%r", path)
+    finally:
+        _store_pending_state.entry = None
 
     if dirty:
         db_set_state(proxy_id, state)
