@@ -49,3 +49,7 @@ ENV/
 # Logs
 *.log
 logs/
+
+# Local-only scripts and data
+import_and_seed.sh
+improved_proxies.json
