@@ -7,6 +7,7 @@
     "deadlock_init": "PUT /proxy/state/deadlock/ {\"orders\":{}}",
     "jioprimewallet_init": "PUT /proxy/state/jioprimewallet/ {\"points\":{\"balance\":1500}}",
     "mahacashback_init": "PUT /proxy/state/mahacashback/ {\"cashback\":{\"balance\":500}}",
+    "juspay_init": "PUT /proxy/state/juspay/ {\"orders\":{}}",
     "pinelabs_init": "PUT /proxy/state/pinelabs/ {\"transactions\":{}}",
     "proxy_users": "For ajiocashwallet login with real credential validation: POST /proxy/users/ajiocashwallet/ {\"username\":\"alice\",\"password\":\"secret\"}"
   },
@@ -560,7 +561,7 @@
               { "path": "points.balance", "value": "snippet(dbget('points.balance', 0) + jsonget('amount', 0))" }
             ],
             "refundId": "snippet(dbget('lastAddRefundId'))",
-            "newBalance": "snippet(dbget('points.balance', 0) + jsonget('amount', 0))"
+            "newBalance": "snippet(dbget('points.balance', 0))"
           }
         }
       }
@@ -571,7 +572,94 @@
     },
     "juspay": {
       "api_domain": "https://sandbox.juspay.in",
+      "_state_schema": {
+        "orders": { "<merchant_order_id>": { "juspayId": "<str>", "amount": "<str>", "status": "<str>", "customerId": "<str>" } }
+      },
       "mocked_requests": {
+        "/orders/": {
+          "POST": {
+            "_store": [
+              { "path": "lastJuspayId", "value": "alnum(12,0)" },
+              { "path": "orders.jsonget(order_id).juspayId", "value": "snippet(dbget('lastJuspayId'))" },
+              { "path": "orders.jsonget(order_id).amount", "value": "jsonget(amount, '0')" },
+              { "path": "orders.jsonget(order_id).status", "value": "CREATED" },
+              { "path": "orders.jsonget(order_id).customerId", "value": "jsonget(customer_id, '')" }
+            ],
+            "id": "snippet(dbget('lastJuspayId'))",
+            "order_id": "jsonget(order_id)",
+            "status": "CREATED",
+            "amount": "jsonget(amount, '0')",
+            "currency": "INR",
+            "merchant_id": "jsonget(merchant_id, 'ajio')",
+            "udf1": "jsonget(udf1, '')",
+            "payment_links": {
+              "web": "snippet('https://sandbox.juspay.in/merchant-view/pay/' + dbget('lastJuspayId'))",
+              "mobile": "snippet('https://sandbox.juspay.in/merchant-view/pay/' + dbget('lastJuspayId'))",
+              "iframe": "snippet('https://sandbox.juspay.in/merchant-view/pay/' + dbget('lastJuspayId'))"
+            },
+            "customer_id": "jsonget(customer_id, '')",
+            "customer_email": "jsonget(customer_email, '')",
+            "customer_phone": "jsonget(customer_phone, '')"
+          }
+        },
+        "/orders/<order_id>": {
+          "GET": {
+            "conditions": [],
+            "responses": [
+              {
+                "when": [
+                  {
+                    "source": "snippet",
+                    "value": "dbget('orders.' + pathparamget('orders'), '__NO__') != '__NO__'"
+                  }
+                ],
+                "then": {
+                  "id": "snippet(dbget('orders.' + pathparamget('orders') + '.juspayId', pathparamget('orders')))",
+                  "order_id": "pathparamget(orders)",
+                  "status": "snippet(dbget('orders.' + pathparamget('orders') + '.status', 'CREATED'))",
+                  "amount": "snippet(dbget('orders.' + pathparamget('orders') + '.amount', '0'))",
+                  "currency": "INR",
+                  "merchant_id": "ajio",
+                  "customer_id": "snippet(dbget('orders.' + pathparamget('orders') + '.customerId', ''))"
+                }
+              }
+            ],
+            "default": {
+              "status_code": 404,
+              "body": {
+                "error_code": "ORDER_NOT_FOUND",
+                "error_message": "Order not found",
+                "order_id": "pathparamget(orders)"
+              }
+            }
+          }
+        },
+        "/v2/upi/verify-vpa": {
+          "POST": {
+            "conditions": [],
+            "responses": [
+              {
+                "when": [
+                  { "field": "vpa", "operator": "eq", "source": "json", "value": "fail@upi" }
+                ],
+                "then": {
+                  "status_code": 200,
+                  "body": {
+                    "vpa": "jsonget(vpa)",
+                    "is_valid": false,
+                    "merchant_id": "jsonget(merchant_id, '')"
+                  }
+                }
+              }
+            ],
+            "default": {
+              "vpa": "jsonget(vpa)",
+              "is_valid": true,
+              "customer_name": "Test User",
+              "merchant_id": "jsonget(merchant_id, '')"
+            }
+          }
+        },
         "/merchants/<merchant_id>/paymentmethods": {
           "GET": {
             "outage": [
@@ -616,7 +704,7 @@
                     { "path": "cashback.balance", "value": "snippet(dbget('cashback.balance', 0) - jsonget('amount', 0))" }
                   ],
                   "redemptionId": "snippet(dbget('lastRedemptionId'))",
-                  "remainingBalance": "snippet(dbget('cashback.balance', 0) - jsonget('amount', 0))"
+                  "remainingBalance": "snippet(dbget('cashback.balance', 0))"
                 }
               }
             ],
@@ -637,7 +725,7 @@
               { "path": "cashback.balance", "value": "snippet(dbget('cashback.balance', 0) + jsonget('amount', 0))" }
             ],
             "refundId": "snippet(dbget('lastRefundId'))",
-            "newBalance": "snippet(dbget('cashback.balance', 0) + jsonget('amount', 0))"
+            "newBalance": "snippet(dbget('cashback.balance', 0))"
           }
         }
       }

@@ -551,6 +551,25 @@ PUT /proxy/state/pinelabs/         {"transactions": {}}
 **`lastId` staging pattern** (established in this redesign):
 In `_store` ops, write the generated ID to a temporary key first (e.g., `lastOrderId`), then subsequent ops in the same batch read it via `_store_pending_state.entry` (exposed as `dbget('lastOrderId')` in resolver context) to build the full nested key for the actual record.
 
+### 2026-04-21 — improved_proxies.json: bug fixes + juspay state + import_and_seed.sh
+
+**Bugs fixed in improved_proxies.json:**
+- `jioprimewallet addActivePoints.newBalance`: was re-adding `jsonget('amount')` to the already-committed new balance → double-add. Fixed to `snippet(dbget('points.balance', 0))` (reads committed value).
+- `mahacashback PERFORM_REDEMPTION.remainingBalance`: same double-deduct pattern. Fixed to `snippet(dbget('cashback.balance', 0))`.
+- `mahacashback PERFORM_REFUND.newBalance`: same double-add. Fixed to `snippet(dbget('cashback.balance', 0))`.
+
+**Root cause:** `_apply_store_ops` clears `_store_pending_state.entry` and commits to MongoDB before returning. Body resolvers then call `_get_state_for_resolver` → reads from MongoDB (already updated). Re-running `old_value ± request_amount` in the body produced wrong results.
+
+**juspay enhanced with MongoDB state:**
+- `POST /orders/` — stores order under `orders.<merchant_order_id>` using `lastJuspayId` staging variable. Returns Juspay-format response with `payment_links`.
+- `GET /orders/<order_id>` — reads stored order from MongoDB; returns 404 if not found.
+- `POST /v2/upi/verify-vpa` — conditional mock: `fail@upi` returns `is_valid: false`, all other VPAs return `is_valid: true`.
+- State seeding: `PUT /proxy/state/juspay/ {"orders": {}}`
+
+**import_and_seed.sh updated:**
+- Added `juspay` seed
+- `ajiocashwallet` seed now includes full initial state with `benefits`
+
 ---
 
 ## 24. How to Update This File
