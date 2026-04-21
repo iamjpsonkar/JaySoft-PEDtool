@@ -41,8 +41,15 @@ from pymongo.errors import PyMongoError
 # ---------------------------------------------------------------------------
 
 DB_PATH = os.environ.get("PED_DB_PATH", os.path.join(_BASE_DIR, "pedapp.db"))
-MONGO_URI = os.environ.get("PED_MONGO_URI", "mongodb://localhost:27017")
 MONGO_DB = os.environ.get("PED_MONGO_DB", "pedapp")
+_mongo_user = os.environ.get("PED_MONGO_USER", "")
+_mongo_pass = os.environ.get("PED_MONGO_PASS", "")
+_mongo_uri_raw = os.environ.get("PED_MONGO_URI", "mongodb://localhost:27017")
+if _mongo_user and _mongo_pass:
+    from urllib.parse import quote_plus
+    MONGO_URI = f"mongodb+srv://{quote_plus(_mongo_user)}:{quote_plus(_mongo_pass)}@" + _mongo_uri_raw.split("@", 1)[-1]
+else:
+    MONGO_URI = _mongo_uri_raw
 DEFAULT_ENC_IV = os.environ.get("PED_DEFAULT_ENC_IV", "")
 DEFAULT_SECRET = os.environ.get("PED_DEFAULT_SECRET", "")
 API_TOKEN = os.environ.get("PED_API_TOKEN", "")
