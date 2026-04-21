@@ -10,7 +10,7 @@
 **Type:** Flask web application (Python 3.9+)  
 **Purpose:** HTTP proxy, mock server, and AES encryption utility for development and testing workflows.  
 **Primary file:** `app.py` (~3090 lines)  
-**Database:** SQLite (proxies, mocks, history, sequences) + MongoDB (state, proxy_users)  
+**Database:** SQLite (proxies, mocks, history, sequences, state, proxy_users) — MongoDB optional for raw_mongo_* helpers only  
 **Frontend:** Server-rendered Jinja2 templates + vanilla JS  
 **Auth:** Session cookie (UI) or Bearer token (API)
 
@@ -550,6 +550,56 @@ PUT /proxy/state/pinelabs/         {"transactions": {}}
 
 **`lastId` staging pattern** (established in this redesign):
 In `_store` ops, write the generated ID to a temporary key first (e.g., `lastOrderId`), then subsequent ops in the same batch read it via `_store_pending_state.entry` (exposed as `dbget('lastOrderId')` in resolver context) to build the full nested key for the actual record.
+
+### 2026-04-21 — Migrate state + users to SQLite; MongoDB now optional
+
+**Problem:** MongoDB Atlas Data API was EOL'd September 2025; PythonAnywhere free plan blocks TCP port 27017 (direct pymongo).
+
+**Solution:** Move `proxy_state` and `proxy_users` to SQLite (already present, zero new deps).
+
+**`bootstrap.py`** — added two new tables (idempotent `CREATE TABLE IF NOT EXISTS`):
+- `proxy_state(proxy_id TEXT PRIMARY KEY, data TEXT)` — JSON blob per proxy
+- `proxy_users(proxy_id TEXT, username TEXT, password TEXT, PRIMARY KEY(proxy_id, username))`
+
+**`app.py` changes:**
+- `db_get_state` / `db_set_state` / `db_merge_state` / `db_clear_state` — now use `_get_db()` (SQLite)
+- `create_proxy_user` / `list_proxy_users` / `delete_proxy_user` / `verify_proxy_user` — now use `_get_db()` (SQLite)
+- Removed `_atlas_request()`, `_USE_ATLAS`, `ATLAS_API_KEY`, `ATLAS_APP_ID`, `ATLAS_CLUSTER` config vars
+- `_get_mongo()` and `raw_mongo_*` helpers kept as-is — MongoDB remains optional for snippet-level queries
+- Removed unused `ASCENDING` import from pymongo
+
+**`.env.example`** — MongoDB section updated to clarify it's optional (raw helpers only).
+
+**On PythonAnywhere:** run `python bootstrap.py` once to create the new tables, then reload the web app. No MongoDB config needed.
+
+---
+
+### 2026-04-21 — MongoDB Atlas Data API backend (attempted, superseded)
+
+**Problem:** PythonAnywhere free plan blocks outbound TCP on non-80/443 ports, so `mongodb+srv://` connections (port 27017) always fail.
+
+**Solution:** MongoDB Atlas Data API — pure HTTPS REST interface to Atlas, always on port 443.
+
+**Config vars added** (`.env` / `.env.example`):
+- `PED_ATLAS_API_KEY` — Atlas Data API key
+- `PED_ATLAS_APP_ID` — Atlas App Services App ID (from Data API settings)
+- `PED_ATLAS_CLUSTER` — cluster name, defaults to `Cluster0`
+
+When `PED_ATLAS_API_KEY` and `PED_ATLAS_APP_ID` are both set, `_USE_ATLAS=True` and all state/user DB operations go through `_atlas_request()`. Otherwise they fall back to direct pymongo (for local dev).
+
+**`_atlas_request(action, collection, body)`** — POSTs to `https://data.mongodb-api.com/app/{ATLAS_APP_ID}/endpoint/data/v1/action/{action}` with the Atlas Data API key. Supports `findOne`, `find`, `insertOne`, `updateOne`, `deleteOne`, `aggregate`.
+
+**Functions updated** (dual-backend `_USE_ATLAS` branch added):
+- `db_get_state`, `db_set_state`, `db_merge_state`, `db_clear_state`
+- `create_proxy_user`, `list_proxy_users`, `delete_proxy_user`, `verify_proxy_user`
+
+**Raw mongo helpers** (`raw_mongo_find`, `raw_mongo_find_one`, etc.) continue using `_get_mongo()` directly — Atlas Data API is optional for those.
+
+**`_get_mongo()`** — index creation removed (was only needed for correctness guarantees; Atlas handles uniqueness differently; raw queries still work fine without enforced unique index in dev).
+
+**`_state_col()` and `_users_col()`** — removed; callers now inline `_get_mongo()[MONGO_DB]["collection"]` in the pymongo branch.
+
+---
 
 ### 2026-04-21 — improved_proxies.json: bug fixes + juspay state + import_and_seed.sh
 

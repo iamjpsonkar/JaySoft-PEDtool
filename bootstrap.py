@@ -79,6 +79,18 @@ CREATE TABLE IF NOT EXISTS mock_sequences (
     UNIQUE(proxy_id, endpoint, method)
 );
 
+CREATE TABLE IF NOT EXISTS proxy_state (
+    proxy_id    TEXT PRIMARY KEY,
+    data        TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS proxy_users (
+    proxy_id    TEXT NOT NULL,
+    username    TEXT NOT NULL,
+    password    TEXT NOT NULL,
+    PRIMARY KEY (proxy_id, username)
+);
+
 """
 
 

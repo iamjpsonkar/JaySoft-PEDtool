@@ -32,7 +32,7 @@ from werkzeug.exceptions import HTTPException
 
 import requests as http_requests
 import shortuuid
-from pymongo import MongoClient, ASCENDING
+from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
 
@@ -41,6 +41,7 @@ from pymongo.errors import PyMongoError
 # ---------------------------------------------------------------------------
 
 DB_PATH = os.environ.get("PED_DB_PATH", os.path.join(_BASE_DIR, "pedapp.db"))
+# MongoDB — optional, used only by raw_mongo_* snippet helpers
 MONGO_DB = os.environ.get("PED_MONGO_DB", "pedapp")
 _mongo_user = os.environ.get("PED_MONGO_USER", "")
 _mongo_pass = os.environ.get("PED_MONGO_PASS", "")
@@ -106,7 +107,7 @@ if app.secret_key == _SECRET_KEY_DEV_FALLBACK:
 
 
 # ---------------------------------------------------------------------------
-# MongoDB client (per-proxy state only)
+# MongoDB client — used by raw_mongo_* helpers only (not for state/users)
 # ---------------------------------------------------------------------------
 
 _mongo_client: MongoClient | None = None
@@ -117,41 +118,27 @@ def _get_mongo() -> MongoClient:
     if _mongo_client is None:
         logger.info("[MONGO] Connecting to %s db=%s", MONGO_URI, MONGO_DB)
         _mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-        db = _mongo_client[MONGO_DB]
-        db["proxy_state"].create_index(
-            [("proxy_id", ASCENDING)], unique=True
-        )
-        db["proxy_users"].create_index(
-            [("proxy_id", ASCENDING), ("username", ASCENDING)],
-            unique=True,
-        )
         logger.info("[MONGO] Client ready")
     return _mongo_client
 
 
-def _state_col():
-    return _get_mongo()[MONGO_DB]["proxy_state"]
-
-
-def _users_col():
-    return _get_mongo()[MONGO_DB]["proxy_users"]
-
-
 # ---------------------------------------------------------------------------
-# User management helpers (proxy_users collection)
+# User management helpers (proxy_users — SQLite)
 # ---------------------------------------------------------------------------
 
 
 def create_proxy_user(proxy_id: str, username: str, password: str) -> None:
     """Upsert a user credential for a proxy."""
     try:
-        _users_col().update_one(
-            {"proxy_id": proxy_id, "username": username},
-            {"$set": {"password": password}},
-            upsert=True,
+        db = _get_db()
+        db.execute(
+            "INSERT INTO proxy_users(proxy_id, username, password) VALUES(?,?,?)"
+            " ON CONFLICT(proxy_id, username) DO UPDATE SET password=excluded.password",
+            (proxy_id, username, password),
         )
+        db.commit()
         logger.info("[USERS] Upserted proxy='%s' username='%s'", proxy_id, username)
-    except PyMongoError as exc:
+    except Exception as exc:
         logger.error("[USERS] create_proxy_user error: %s", exc)
         raise
 
@@ -159,9 +146,12 @@ def create_proxy_user(proxy_id: str, username: str, password: str) -> None:
 def list_proxy_users(proxy_id: str) -> list[dict]:
     """Return all users for a proxy (password excluded)."""
     try:
-        docs = _users_col().find({"proxy_id": proxy_id}, {"_id": 0, "password": 0})
-        return list(docs)
-    except PyMongoError as exc:
+        db = _get_db()
+        rows = db.execute(
+            "SELECT proxy_id, username FROM proxy_users WHERE proxy_id=?", (proxy_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception as exc:
         logger.error("[USERS] list_proxy_users error: %s", exc)
         return []
 
@@ -169,12 +159,16 @@ def list_proxy_users(proxy_id: str) -> list[dict]:
 def delete_proxy_user(proxy_id: str, username: str) -> bool:
     """Delete a user. Returns True if found and deleted."""
     try:
-        result = _users_col().delete_one({"proxy_id": proxy_id, "username": username})
-        deleted = result.deleted_count > 0
+        db = _get_db()
+        cur = db.execute(
+            "DELETE FROM proxy_users WHERE proxy_id=? AND username=?", (proxy_id, username)
+        )
+        db.commit()
+        deleted = cur.rowcount > 0
         if deleted:
             logger.info("[USERS] Deleted proxy='%s' username='%s'", proxy_id, username)
         return deleted
-    except PyMongoError as exc:
+    except Exception as exc:
         logger.error("[USERS] delete_proxy_user error: %s", exc)
         raise
 
@@ -182,16 +176,18 @@ def delete_proxy_user(proxy_id: str, username: str) -> bool:
 def verify_proxy_user(proxy_id: str, username: str, password: str) -> bool:
     """Return True if username+password match a stored credential."""
     try:
-        doc = _users_col().find_one(
-            {"proxy_id": proxy_id, "username": username}, {"_id": 0, "password": 1}
-        )
-        if not doc:
+        db = _get_db()
+        row = db.execute(
+            "SELECT password FROM proxy_users WHERE proxy_id=? AND username=?",
+            (proxy_id, username),
+        ).fetchone()
+        if not row:
             logger.debug("[USERS] verify: no user proxy='%s' username='%s'", proxy_id, username)
             return False
-        match = doc.get("password") == password
+        match = row["password"] == password
         logger.debug("[USERS] verify: proxy='%s' username='%s' match=%s", proxy_id, username, match)
         return match
-    except PyMongoError as exc:
+    except Exception as exc:
         logger.warning("[USERS] verify_proxy_user error: %s", exc)
         return False
 
@@ -626,62 +622,65 @@ def db_reset_sequence(proxy_id: str, endpoint: str | None = None) -> int:
 
 
 # ---------------------------------------------------------------------------
-# MongoDB helper functions — Per-proxy State (for dbget resolver)
+# Per-proxy State helpers — SQLite (proxy_state table)
 # ---------------------------------------------------------------------------
 
 
 def db_get_state(proxy_id: str) -> dict:
-    """Return the per-proxy state dict from MongoDB, or {} if none stored."""
+    """Return the per-proxy state dict from SQLite, or {} if none stored."""
     try:
-        doc = _state_col().find_one({"proxy_id": proxy_id}, {"_id": 0, "data": 1})
-        if not doc:
+        row = _get_db().execute(
+            "SELECT data FROM proxy_state WHERE proxy_id=?", (proxy_id,)
+        ).fetchone()
+        if not row:
             return {}
-        data = doc.get("data", {})
+        data = json.loads(row["data"])
         return data if isinstance(data, dict) else {}
-    except PyMongoError as exc:
+    except Exception as exc:
         logger.warning("[STATE] db_get_state error proxy='%s': %s", proxy_id, exc)
         return {}
 
 
 def db_set_state(proxy_id: str, data: dict) -> None:
-    """Replace the per-proxy state in MongoDB."""
+    """Replace the per-proxy state in SQLite."""
     try:
-        _state_col().update_one(
-            {"proxy_id": proxy_id},
-            {"$set": {"data": data}},
-            upsert=True,
+        db = _get_db()
+        db.execute(
+            "INSERT INTO proxy_state(proxy_id, data) VALUES(?,?)"
+            " ON CONFLICT(proxy_id) DO UPDATE SET data=excluded.data",
+            (proxy_id, json.dumps(data)),
         )
+        db.commit()
         logger.info("[STATE] Replaced proxy='%s' keys=%d", proxy_id, len(data))
-    except PyMongoError as exc:
+    except Exception as exc:
         logger.error("[STATE] db_set_state error proxy='%s': %s", proxy_id, exc)
         raise
 
 
 def db_merge_state(proxy_id: str, patch: dict) -> dict:
-    """Shallow-merge `patch` into the per-proxy state using $set. Returns merged result."""
+    """Shallow-merge `patch` into the per-proxy state. Returns merged result."""
     try:
-        _state_col().update_one(
-            {"proxy_id": proxy_id},
-            {"$set": {f"data.{k}": v for k, v in patch.items()}},
-            upsert=True,
-        )
-        merged = db_get_state(proxy_id)
+        current = db_get_state(proxy_id)
+        current.update(patch)
+        db_set_state(proxy_id, current)
         logger.info("[STATE] Merged proxy='%s' patch_keys=%s", proxy_id, list(patch))
-        return merged
-    except PyMongoError as exc:
+        return current
+    except Exception as exc:
         logger.error("[STATE] db_merge_state error proxy='%s': %s", proxy_id, exc)
         raise
 
 
 def db_clear_state(proxy_id: str) -> bool:
-    """Delete the per-proxy state document. Returns True if something was deleted."""
+    """Delete the per-proxy state row. Returns True if something was deleted."""
     try:
-        result = _state_col().delete_one({"proxy_id": proxy_id})
-        deleted = result.deleted_count > 0
+        db = _get_db()
+        cur = db.execute("DELETE FROM proxy_state WHERE proxy_id=?", (proxy_id,))
+        db.commit()
+        deleted = cur.rowcount > 0
         if deleted:
             logger.info("[STATE] Cleared proxy='%s'", proxy_id)
         return deleted
-    except PyMongoError as exc:
+    except Exception as exc:
         logger.error("[STATE] db_clear_state error proxy='%s': %s", proxy_id, exc)
         raise
 
