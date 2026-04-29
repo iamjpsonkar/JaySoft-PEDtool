@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PED Tools | Login</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/common.css">
     <link rel="stylesheet" href="/static/css/login.css">
 </head>
@@ -26,13 +28,16 @@
             <button type="submit" class="btn">Login</button>
         </form>
 
-        <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--gray-border);display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
-            <a href="/" style="font-size:0.85rem;color:var(--blue);text-decoration:none;">Home</a>
-            <a href="/proxy/" style="font-size:0.85rem;color:var(--blue);text-decoration:none;">Mock Builder</a>
-            <a href="/proxy/helper" style="font-size:0.85rem;color:var(--blue);text-decoration:none;">Docs</a>
+        <div class="login-footer">
+            <a href="/">Home</a>
+            <a href="/proxy/">Mock Builder</a>
+            <a href="/proxy/helper">Docs</a>
         </div>
     </div>
 
     <script src="/static/js/login.js"></script>
+    <script>
+    (function(){var t=localStorage.getItem('ped-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t)})();
+    </script>
 </body>
 </html>

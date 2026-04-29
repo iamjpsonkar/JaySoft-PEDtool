@@ -77,16 +77,21 @@ const TYPE_HINTS = {
     jsonget: 'JSON body key, e.g. user_id',
     paramget: 'Query param name, e.g. page',
     pathparamget: 'URL prefix, e.g. orders',
+    dbget: 'State path, e.g. wallet.bonus',
+    mongoget: 'collection, key, path, default',
     upper: 'Length, e.g. 8',
     lower: 'Length, e.g. 10',
     chars: 'Length, e.g. 6',
     digit: 'Length, e.g. 5',
-    alnum: 'Pattern, e.g. [3,2,4,1]',
-    snippet: 'Expression, e.g. len("hello")',
+    alnum: 'Letters,Digits e.g. 8,4',
+    now: 'Offset seconds, e.g. +3600 (optional)',
+    now_epoch: 'Offset seconds, e.g. +3600 (optional)',
+    snippet: 'Expression, e.g. dbget(\'balance\', 0) + 100',
 };
 
-const ALL_TYPES = ['static','headerget','jsonget','paramget','pathparamget',
-                   'upper','lower','chars','digit','alnum','snippet'];
+const ALL_TYPES = ['static','jsonget','headerget','paramget','pathparamget',
+                   'dbget','mongoget','upper','lower','chars','digit','alnum',
+                   'now','now_epoch','snippet'];
 
 function onTypeChange(sel) {
     const row = sel.closest('.mock-row');
@@ -96,14 +101,28 @@ function onTypeChange(sel) {
     valInput.value = '';
 }
 
+var _TYPE_GROUPS = [
+    {label:'Static', types:['static']},
+    {label:'Request Data', types:['jsonget','headerget','paramget','pathparamget']},
+    {label:'State', types:['dbget','mongoget']},
+    {label:'Random', types:['upper','lower','chars','digit','alnum']},
+    {label:'Timestamps', types:['now','now_epoch']},
+    {label:'Expression', types:['snippet']}
+];
+var _TYPE_LABELS = {static:'Static Value',jsonget:'jsonget() - body',headerget:'headerget() - header',
+    paramget:'paramget() - query',pathparamget:'pathparamget() - URL',dbget:'dbget() - state',
+    mongoget:'mongoget() - MongoDB',upper:'upper(n)',lower:'lower(n)',chars:'chars(n)',
+    digit:'digit(n)',alnum:'alnum(L,D)',now:'now()',now_epoch:'now_epoch()',snippet:'snippet() - expr'};
 function buildRowHtml(key, valType, val) {
     key = key || '';
     valType = valType || 'static';
     val = val || '';
-    const optHtml = ALL_TYPES.map(o =>
-        '<option value="' + o + '"' + (o===valType?' selected':'') + '>' +
-        (o === 'static' ? 'Static Value' : o+'()') + '</option>'
-    ).join('');
+    var optHtml = _TYPE_GROUPS.map(function(g) {
+        var opts = g.types.map(function(o) {
+            return '<option value="'+o+'"'+(o===valType?' selected':'')+'>'+(_TYPE_LABELS[o]||o+'()')+'</option>';
+        }).join('');
+        return '<optgroup label="'+g.label+'">'+opts+'</optgroup>';
+    }).join('');
     return '<div class="mock-row">' +
         '<input type="text" placeholder="key" class="mk" value="' + escapeAttr(key) + '" oninput="updatePreview()" />' +
         '<select class="mv-type" onchange="onTypeChange(this);updatePreview();">' + optHtml + '</select>' +
@@ -558,6 +577,13 @@ async function testMock() {
 /* ------------------------------------------------------------------ */
 /*  Mocks table — Load, Render, View, Edit, Delete                    */
 /* ------------------------------------------------------------------ */
+
+function downloadPostman() {
+    var id = document.getElementById('mocks_proxy_id').value.trim();
+    if (!id) { showToast('Enter a proxy identifier first', 'error'); return; }
+    window.open('/proxy/export/' + encodeURIComponent(id) + '/postman/', '_blank');
+    showToast('Downloading Postman collection for "' + id + '"...', 'success');
+}
 
 async function loadMocks() {
     var id = document.getElementById('mocks_proxy_id').value.trim();

@@ -74,6 +74,7 @@ async function loadProxyList() {
                     '<button class="btn btn-blue btn-sm" onclick="viewMocks(\'' + id + '\')">View Mocks</button> ' +
                     '<button class="btn btn-outline btn-sm" onclick="fillClone(\'' + id + '\')">Clone</button> ' +
                     '<button class="btn btn-green btn-sm" onclick="exportProxy(\'' + id + '\')">Export</button> ' +
+                    '<button class="btn btn-outline btn-sm" onclick="exportPostman(\'' + id + '\')" title="Download Postman collection">Postman</button> ' +
                     '<span id="del-' + id + '">' +
                         '<button class="btn btn-red btn-sm" onclick="confirmDelete(\'' + id + '\')">Delete</button>' +
                     '</span>' +
@@ -227,6 +228,13 @@ async function exportProxy(id) {
     } catch (err) {
         handleApiError(err);
     }
+}
+
+function exportPostman(id) {
+    var url = '/proxy/export/' + encodeURIComponent(id) + '/postman/';
+    // Open in new tab — browser will download the file due to Content-Disposition header
+    window.open(url, '_blank');
+    showToast('Downloading Postman collection for "' + id + '"...', 'success');
 }
 
 /* ------------------------------------------------------------------ */

@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PED Tools | Proxy Server</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/common.css">
     <link rel="stylesheet" href="/static/css/proxy-server.css">
 </head>
@@ -14,9 +16,13 @@
         <a href="/">Home</a>
         {% if session.get('authenticated') %}
         <a href="/proxy/manage/">Manage</a>
-        <a href="/logout" style="margin-left:auto;opacity:0.8;">Logout</a>
+        <span class="nav-spacer"></span>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+        <a href="/logout" style="opacity:0.8;">Logout</a>
         {% else %}
-        <a href="/login" style="margin-left:auto;">Login</a>
+        <span class="nav-spacer"></span>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+        <a href="/login">Login</a>
         {% endif %}
     </div>
 
@@ -35,7 +41,7 @@
                     <input type="url" id="api_domain" placeholder="https://api.example.com" required />
                 </div>
                 <div class="field">
-                    <label for="reg_identifier">Identifier <span style="font-weight:400;color:var(--gray-text)">(optional)</span></label>
+                    <label for="reg_identifier">Identifier <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
                     <div class="hint">Leave blank to auto-generate. Use a memorable name like "payments-v2"</div>
                     <input type="text" id="reg_identifier" placeholder="my-proxy" />
                 </div>
@@ -122,7 +128,7 @@
                     <span class="toggle-label">Sequence Mode</span>
                     <span class="hint" style="margin:0;">(Return different responses on consecutive calls)</span>
                 </div>
-                <div id="sequenceBuilder" style="display:none;margin-bottom:14px;padding:14px;background:#f8f9fa;border-radius:6px;border:1px solid var(--gray-border);">
+                <div id="sequenceBuilder" style="display:none;margin-bottom:14px;padding:14px;background:var(--surface-inset);border-radius:var(--radius-sm);border:1px solid var(--border);">
                     <label>Sequence Steps</label>
                     <div class="hint" style="margin-bottom:10px;">Each step is returned in order. After all steps, the last one repeats.</div>
                     <div id="sequenceSteps"></div>
@@ -138,7 +144,7 @@
                     <span class="toggle-label">Conditional Mode</span>
                     <span class="hint" style="margin:0;">(Return different responses based on request conditions)</span>
                 </div>
-                <div id="conditionalBuilder" style="display:none;margin-bottom:14px;padding:14px;background:#f8f9fa;border-radius:6px;border:1px solid var(--gray-border);">
+                <div id="conditionalBuilder" style="display:none;margin-bottom:14px;padding:14px;background:var(--surface-inset);border-radius:var(--radius-sm);border:1px solid var(--border);">
                     <label>Conditions</label>
                     <div class="hint" style="margin-bottom:10px;">First matching condition wins. A default response is used if none match.</div>
                     <div id="conditionRows"></div>
@@ -157,24 +163,40 @@
 
                 <!-- Visual Builder Tab -->
                 <div class="tab-content active" id="tab-visual">
-                    <p style="font-size:0.85rem;color:var(--gray-text);margin:0 0 10px;">
+                    <p style="font-size:0.85rem;color:var(--text-secondary);margin:0 0 10px;">
                         Build your mock response field by field. Choose a value type to insert dynamic placeholders.
                     </p>
                     <div id="mockRows">
                         <div class="mock-row">
                             <input type="text" placeholder="key" class="mk" />
                             <select class="mv-type" onchange="onTypeChange(this)">
-                                <option value="static">Static Value</option>
-                                <option value="headerget">headerget()</option>
-                                <option value="jsonget">jsonget()</option>
-                                <option value="paramget">paramget()</option>
-                                <option value="pathparamget">pathparamget()</option>
-                                <option value="upper">upper(n)</option>
-                                <option value="lower">lower(n)</option>
-                                <option value="chars">chars(n)</option>
-                                <option value="digit">digit(n)</option>
-                                <option value="alnum">alnum([...])</option>
-                                <option value="snippet">snippet()</option>
+                                <optgroup label="Static">
+                                    <option value="static">Static Value</option>
+                                </optgroup>
+                                <optgroup label="Request Data">
+                                    <option value="jsonget">jsonget() - body field</option>
+                                    <option value="headerget">headerget() - header</option>
+                                    <option value="paramget">paramget() - query param</option>
+                                    <option value="pathparamget">pathparamget() - URL segment</option>
+                                </optgroup>
+                                <optgroup label="State (Storage)">
+                                    <option value="dbget">dbget() - read state</option>
+                                    <option value="mongoget">mongoget() - MongoDB lookup</option>
+                                </optgroup>
+                                <optgroup label="Random Generators">
+                                    <option value="upper">upper(n) - uppercase</option>
+                                    <option value="lower">lower(n) - lowercase</option>
+                                    <option value="chars">chars(n) - mixed case</option>
+                                    <option value="digit">digit(n) - digits</option>
+                                    <option value="alnum">alnum(L,D) - letters+digits</option>
+                                </optgroup>
+                                <optgroup label="Timestamps">
+                                    <option value="now">now() - ISO timestamp</option>
+                                    <option value="now_epoch">now_epoch() - unix epoch</option>
+                                </optgroup>
+                                <optgroup label="Expression">
+                                    <option value="snippet">snippet() - eval expression</option>
+                                </optgroup>
                             </select>
                             <input type="text" placeholder="value" class="mv" />
                             <button class="btn btn-red btn-sm" onclick="removeRow(this)" title="Remove">&times;</button>
@@ -186,7 +208,7 @@
                     </div>
                     <div style="margin-top:12px;">
                         <label>Preview</label>
-                        <pre id="visualPreview" style="background:#f5f5f5;padding:12px;border-radius:6px;font-family:var(--mono);font-size:0.82rem;min-height:60px;margin:0;"></pre>
+                        <pre id="visualPreview" style="background:var(--surface-inset);padding:12px;border-radius:var(--radius-sm);font-family:var(--mono);font-size:0.82rem;min-height:60px;margin:0;border:1px solid var(--border);color:var(--text);"></pre>
                     </div>
                 </div>
 
@@ -194,16 +216,24 @@
                 <div class="tab-content" id="tab-raw">
                     <label for="mock_json_raw">Mock Response JSON</label>
                     <div class="placeholder-bar">
-                        <span class="pill" onclick="insertPlaceholder('headerget(\"Header-Name\")')">headerget</span>
-                        <span class="pill" onclick="insertPlaceholder('jsonget(\"key\")')">jsonget</span>
-                        <span class="pill" onclick="insertPlaceholder('paramget(\"param\")')">paramget</span>
-                        <span class="pill" onclick="insertPlaceholder('pathparamget(\"prefix\")')">pathparamget</span>
+                        <span class="pill pill-section">Request</span>
+                        <span class="pill" onclick="insertPlaceholder('jsonget(key)')">jsonget</span>
+                        <span class="pill" onclick="insertPlaceholder('headerget(Header-Name)')">headerget</span>
+                        <span class="pill" onclick="insertPlaceholder('paramget(param)')">paramget</span>
+                        <span class="pill" onclick="insertPlaceholder('pathparamget(prefix)')">pathparamget</span>
+                        <span class="pill pill-section">State</span>
+                        <span class="pill" onclick="insertPlaceholder('dbget(path.to.key, default)')">dbget</span>
+                        <span class="pill" onclick="insertPlaceholder('snippet(dbget(\\\'key\\\', 0))')">snippet+dbget</span>
+                        <span class="pill pill-section">Random</span>
                         <span class="pill" onclick="insertPlaceholder('upper(8)')">upper</span>
                         <span class="pill" onclick="insertPlaceholder('lower(8)')">lower</span>
-                        <span class="pill" onclick="insertPlaceholder('chars(8)')">chars</span>
                         <span class="pill" onclick="insertPlaceholder('digit(6)')">digit</span>
-                        <span class="pill" onclick="insertPlaceholder('alnum([3,2,4,3])')">alnum</span>
-                        <span class="pill" onclick="insertPlaceholder('snippet(\"1 + 1\")')">snippet</span>
+                        <span class="pill" onclick="insertPlaceholder('alnum(8,4)')">alnum</span>
+                        <span class="pill pill-section">Time</span>
+                        <span class="pill" onclick="insertPlaceholder('now()')">now</span>
+                        <span class="pill" onclick="insertPlaceholder('now_epoch()')">epoch</span>
+                        <span class="pill pill-section">Expr</span>
+                        <span class="pill" onclick="insertPlaceholder('snippet(1 + 1)')">snippet</span>
                     </div>
                     <textarea id="mock_json_raw" placeholder='{"status": "ok", "id": "digit(6)"}'></textarea>
                 </div>
@@ -221,11 +251,12 @@
         <div style="margin-top:24px;">
             <div class="card full">
                 <h2>Existing Mocks</h2>
-                <div class="field" style="max-width:300px;">
+                <div class="field" style="max-width:450px;">
                     <label for="mocks_proxy_id">Proxy Identifier</label>
                     <div style="display:flex;gap:8px;">
                         <input type="text" id="mocks_proxy_id" placeholder="my-proxy" />
                         <button class="btn btn-blue btn-sm" onclick="loadMocks()">Load</button>
+                        <button class="btn btn-outline btn-sm" onclick="downloadPostman()" title="Download Postman collection">Postman</button>
                     </div>
                 </div>
                 <div id="mocksContainer">
@@ -265,5 +296,9 @@
 
     <script src="/static/js/common.js"></script>
     <script src="/static/js/proxy-server.js"></script>
+    <script>
+    (function(){var t=localStorage.getItem('ped-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);document.querySelector('.theme-toggle').textContent=t==='dark'?'☀️':'🌙'})();
+    function toggleTheme(){var d=document.documentElement,t=d.getAttribute('data-theme')==='dark'?'light':'dark';d.setAttribute('data-theme',t);localStorage.setItem('ped-theme',t);document.querySelector('.theme-toggle').textContent=t==='dark'?'☀️':'🌙'}
+    </script>
 </body>
 </html>

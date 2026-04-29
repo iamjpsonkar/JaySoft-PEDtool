@@ -186,6 +186,7 @@ Security headers added via `@app.after_request` hook:
 | `DELETE` | `/proxy/delete/<id>/` | `delete_proxy` |
 | `POST` | `/proxy/clone/` | `clone_proxy` |
 | `GET` | `/proxy/export/<id>/` | `export_proxy` |
+| `GET` | `/proxy/export/<id>/postman/` | `export_postman` |
 | `GET` | `/proxy/export/all/` | `export_all_proxies` |
 | `POST` | `/proxy/import/` | `import_proxies` |
 | `GET` | `/proxy/history/<id>/` | `get_history` |
@@ -477,6 +478,149 @@ Common log prefixes:
 
 ## 23. Changelog (recent)
 
+### 2026-04-29 — Postman collection export + UI font contrast fix
+
+**New endpoint:** `GET /proxy/export/<identifier>/postman/`
+- Generates a Postman v2.1 collection JSON from proxy mocks
+- Each mock endpoint+method becomes a Postman request item
+- Auto-infers example request bodies from `jsonget()` refs in conditions, `_store` paths, and values
+- Includes State Management folder (GET/PUT/PATCH state)
+- Returns as downloadable file (`Content-Disposition: attachment`)
+- Helper function `_postman_example_body()` scans mock structure for jsonget references
+
+**Visual mock generator improvements:**
+- Resolver dropdown now uses `<optgroup>` with categories: Request Data, State, Random, Timestamps, Expression
+- Added new types: `dbget`, `mongoget`, `now`, `now_epoch`
+- Placeholder pill bar reorganized with section labels
+- Select width increased to 200px for grouped options
+
+**Documentation updates (proxy_helper.html):**
+- Added 5 new sections: State API, _store (Write), dbget (Read), Staging Pattern, Recipes
+- TOC updated with State & Storage section
+- Dynamic Placeholders table updated with dbget, now, now_epoch entries
+- snippet() docs expanded with full available function list
+
+**Font contrast fix:**
+- `--text` darkened from `#1e293b` to `#0f172a`
+- `--text-secondary` darkened from `#64748b` to `#374151`
+- `--text-muted` darkened from `#94a3b8` to `#6b7280`
+- `--nav-link` darkened from `#64748b` to `#374151`
+- Labels bumped from 0.85rem to 0.875rem
+- Hints changed from --text-muted to --text-secondary
+- Body font-size set to 0.9375rem (15px)
+- Nav links weight bumped from 500 to 600
+
+---
+
+### 2026-04-29 — Proxy Manage & Proxy Helper pages modern UI refresh
+
+**Files changed:**
+- `static/css/proxy-manage.css` — full rewrite to use CSS variable system from `common.css`
+- `static/css/proxy-helper.css` — full rewrite to use CSS variable system from `common.css`
+- `templates/proxy_manage.html` — added Google Fonts (Inter), theme toggle button, nav-spacer, theme detection/toggle script
+- `templates/proxy_helper.html` — added Google Fonts (Inter), theme toggle button, nav-spacer, theme detection/toggle script
+
+**CSS changes (proxy-manage.css):**
+- All hardcoded colors replaced with CSS variables
+- `.status-bar`: --surface bg, --border, --text-muted; transition for smooth theme switching
+- `.status-dot`: .ok=--success, .err=--danger, .loading=--warning; border-radius uses --radius-full
+- `.history-detail`: --surface-inset bg, --border; pre uses --code-bg/--code-text with --border
+- `.history-detail-label`: --primary color instead of hardcoded --blue-dark
+- `.source-badge`: mock=--purple, forward=--primary, redirect=--warning, error=--danger; --radius-sm
+- `.section-chevron`: --text-muted, transition uses var(--transition)
+- `.hidden-section`: --surface-inset bg, --border, --radius-sm; fadeSlideIn animation on .visible
+- `.clickable-row`: hover uses --primary-light instead of --blue-light
+
+**CSS changes (proxy-helper.css):**
+- All hardcoded colors replaced with CSS variables
+- `.card p`: --text-secondary; `.card h2/h3`: --text
+- `code` inline: --primary-light bg, #c084fc purple text (dark mode: #d8b4fe via `[data-theme="dark"]` selector)
+- `pre` code blocks: --code-bg, --code-text, --border, --radius; `pre code` resets inline-code styles
+- `.accordion`: --surface bg, --shadow, --border; hover uses --primary-light; arrow uses --primary; transitions added
+- `.method-ANY`: --warning with dark text
+- `.flow-step`: --primary-light bg, --text color; `.flow-step.alt`: success green with alpha bg
+- `.note`: --primary-light bg, --primary left-border, --text color (was hardcoded #004080)
+- `.toc a`: --primary color with transition
+- `.ref-table th`: --surface-inset bg, --text-secondary color, --border bottom
+- `.ref-table td`: --border bottom instead of hardcoded #eee
+- All components have transition properties for smooth theme switching
+
+**HTML changes (proxy_manage.html):**
+- Added Google Fonts preconnect + Inter link (400/500/600/700)
+- Replaced `style="margin-left:auto;opacity:0.8;"` on Logout with `<span class="nav-spacer"></span>` + removed inline style
+- Added `<button class="theme-toggle">` before Logout
+- Added theme detection IIFE + toggleTheme() script at end of body
+
+**HTML changes (proxy_helper.html):**
+- Added Google Fonts preconnect + Inter link (400/500/600/700)
+- Replaced `style="margin-left:auto;"` / `style="margin-left:auto;opacity:0.8;"` on Login/Logout with `<span class="nav-spacer"></span>`
+- Added `<button class="theme-toggle">` before Login/Logout in both auth branches
+- Manage link moved before the nav-spacer; auth-conditional block split so nav-spacer + theme toggle are outside it
+- Added theme detection IIFE + toggleTheme() script at end of body
+
+**Not changed:** IDs, onclick handlers, Jinja2 form logic, JS files, page content/structure.
+
+---
+
+### 2026-04-29 — Proxy Server page modern UI refresh
+
+**Files changed:**
+- `static/css/proxy-server.css` — full rewrite to use new CSS variable system from `common.css`
+- `templates/proxy_server.html` — added Google Fonts (Inter), theme toggle button, nav-spacer, theme detection/toggle script
+
+**CSS changes (proxy-server.css):**
+- All hardcoded colors replaced with CSS variables (--surface, --border, --text-muted, --primary, --success, --danger, --warning, --purple, --code-bg, --code-text, etc.)
+- `.status-bar`: --surface bg, --border, --text-muted
+- `.status-dot`: .ok=--success, .err=--danger, .loading=--warning
+- `.tabs`/`.tab`: inactive uses --surface-inset, active uses --surface with --primary accent bottom border
+- `.tab-content`: --border, --surface background
+- `.pattern-help`: --primary-light bg, --text color; dark-mode code bg override
+- `.toggle .slider`: --border track, --primary when checked, smooth --transition
+- `.condition-row`/`.sequence-step`: --surface-inset bg, --border, hover with --border-hover
+- `.pill`: --border, --surface bg, hover to --primary-light/--primary
+- `.history-detail`: --surface-inset bg, pre uses --code-bg/--code-text
+- `.source-badge`: mock=--purple, forward=--primary, redirect=--warning, error=--danger
+- `.section-chevron`: --text-muted, transition uses var(--transition)
+- Added transition properties throughout for smooth theme switching
+- No class names or selectors removed or renamed
+
+**HTML changes (proxy_server.html):**
+- Added Google Fonts preconnect + Inter link (400/500/600/700)
+- Replaced `style="margin-left:auto;"` on Login/Logout with `<span class="nav-spacer"></span>`
+- Added `<button class="theme-toggle">` before Login/Logout in both auth branches
+- Added theme detection IIFE + toggleTheme() script at end of body
+
+**Not changed:** IDs, onclick handlers, Jinja2 conditionals, proxy-server.js dependencies.
+
+---
+
+### 2026-04-29 — Login page modern UI refresh
+
+**Files changed:**
+- `static/css/login.css` — fully rewritten to use the new CSS variable design system from `common.css`
+- `templates/login.html` — minimal template updates (no form/logic changes)
+
+**`login.css` changes:**
+- Card uses `var(--surface)`, `var(--border)`, `var(--radius-lg)`, `var(--shadow-xl)` instead of hardcoded values
+- Subtle dual radial-gradient background using `var(--primary-glow)` over `var(--bg)`
+- Card entrance animation (`cardAppear`: fade + slide-up + scale)
+- Button uses `var(--primary)` / `var(--primary-hover)` with lift-on-hover effect
+- Error message restyled: left accent border (`var(--danger)`), `color-mix()` tinted background, left-aligned text
+- Footer links extracted to `.login-footer` class (was inline styles with old `--blue` / `--gray-border` vars)
+- Footer link hover uses `var(--primary-light)` background pill
+- Input focus ring uses `var(--primary-glow)`
+- All colors/borders use CSS variables for full dark mode support
+- Responsive breakpoint at 480px reduces card padding
+
+**`login.html` changes:**
+- Added Google Fonts preconnect + Inter font link (400/500/600/700 weights)
+- Footer links `div` changed from inline styles to `class="login-footer"`
+- Added theme detection script at end of body: reads `ped-theme` from localStorage or falls back to `prefers-color-scheme` media query, sets `data-theme` attribute on `<html>`
+
+**Not changed:** Form action, field names, Jinja2 conditionals, `login.js` script, lock emoji icon.
+
+---
+
 ### 2026-04-21 — Security hardening + bug fixes (commit ea49df3 + follow-up)
 
 **Bugs fixed:**
@@ -619,6 +763,28 @@ When `PED_ATLAS_API_KEY` and `PED_ATLAS_APP_ID` are both set, `_USE_ATLAS=True` 
 **import_and_seed.sh updated:**
 - Added `juspay` seed
 - `ajiocashwallet` seed now includes full initial state with `benefits`
+
+---
+
+### 2026-04-29 — Index page UI modernization (CSS + template)
+
+**`static/css/index.css`** — fully rewritten to use the new CSS variable design system from `common.css`:
+- Replaced all hardcoded colors (`#fafafa`, `#f8f9fa`, `#333`, `#aaa`, `var(--white)`, `var(--gray-border)`, `var(--gray-text)`, `var(--blue)`, `var(--blue-light)`) with design-system variables (`var(--surface)`, `var(--surface-inset)`, `var(--border)`, `var(--text)`, `var(--text-secondary)`, `var(--text-muted)`, `var(--primary)`, `var(--primary-light)`, `var(--primary-glow)`)
+- Added `backdrop-filter` glass effect to `.toolbar`
+- Added `transition` properties throughout for smooth light/dark theme switching
+- Pane-header buttons now use `var(--font)`, `var(--primary-light)` hover, and subtle `translateY(-1px)` lift
+- Checkbox accent color changed from `var(--blue)` to `var(--primary)`
+- Input focus ring uses `var(--primary-glow)` box-shadow instead of simple border color change
+- Layout structure (full-height body, toolbar, split editors, status bar) and 700px responsive breakpoint preserved
+
+**`templates/index.html`** — minimal template changes:
+- Added Google Fonts preconnect + Inter font link in `<head>`
+- Added `class="active"` Home link in topbar
+- Replaced `style="margin-left:auto;"` with `<span class="nav-spacer"></span>` (uses `.nav-spacer { flex: 1 }` from common.css)
+- Added theme toggle button (`<button class="theme-toggle">`) before Login/Logout link
+- Added inline theme init script at end of body (reads `ped-theme` from localStorage or `prefers-color-scheme`, sets `data-theme` attribute, exposes `toggleTheme()` global function)
+
+No IDs, JS-referenced class names, onclick handlers, or JS files were changed.
 
 ---
 

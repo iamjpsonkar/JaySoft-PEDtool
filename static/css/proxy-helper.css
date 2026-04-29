@@ -8,46 +8,53 @@ body { line-height: 1.6; }
 
 /* --- Card overrides for docs --- */
 .card { padding: 24px; margin-bottom: 20px; }
-.card h2 { margin: 0 0 12px; font-size: 1.15rem; }
-.card h3 { margin: 16px 0 8px; font-size: 1rem; }
-.card p { margin: 0 0 10px; color: var(--gray-text); }
+.card h2 { margin: 0 0 12px; font-size: 1.15rem; color: var(--text); }
+.card h3 { margin: 16px 0 8px; font-size: 1rem; color: var(--text); }
+.card p { margin: 0 0 10px; color: var(--text-secondary); }
 .card ul { margin: 0 0 10px 20px; }
 .card li { margin-bottom: 6px; }
 
 /* --- Inline code --- */
 code {
-    background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 3px;
-    font-family: var(--mono); font-size: 0.88em; color: #c7254e;
+    background: var(--primary-light); padding: 2px 6px; border-radius: 3px;
+    font-family: var(--mono); font-size: 0.88em; color: #c084fc;
 }
+[data-theme="dark"] code { color: #d8b4fe; }
 
 /* --- Code blocks --- */
 pre {
-    background: #1e1e2e; color: #cdd6f4; padding: 16px;
+    background: var(--code-bg); color: var(--code-text); padding: 16px;
     border-radius: var(--radius); overflow-x: auto;
     font-family: var(--mono); font-size: 0.82rem; line-height: 1.5;
-    margin: 10px 0; position: relative;
+    margin: 10px 0; position: relative; border: 1px solid var(--border);
+}
+pre code {
+    background: none; color: inherit; padding: 0; border-radius: 0; font-size: inherit;
 }
 pre .copy-btn {
     position: absolute; top: 8px; right: 8px;
-    background: rgba(255,255,255,0.1); color: #cdd6f4;
+    background: rgba(255,255,255,0.1); color: var(--code-text);
     border: 1px solid rgba(255,255,255,0.2); padding: 3px 10px;
-    border-radius: 4px; cursor: pointer; font-size: 0.72rem;
+    border-radius: var(--radius-sm); cursor: pointer; font-size: 0.72rem;
+    transition: all var(--transition);
 }
 pre .copy-btn:hover { background: rgba(255,255,255,0.2); }
 
 /* --- Accordion --- */
 .accordion {
-    background: var(--white); border-radius: var(--radius);
+    background: var(--surface); border-radius: var(--radius);
     box-shadow: var(--shadow); margin-bottom: 12px; overflow: hidden;
+    border: 1px solid var(--border);
+    transition: background var(--transition), border-color var(--transition), box-shadow var(--transition);
 }
 .accordion-header {
     padding: 14px 20px; cursor: pointer; font-weight: 600;
     display: flex; align-items: center; gap: 10px;
-    transition: background 0.2s; user-select: none;
+    transition: background var(--transition); user-select: none;
 }
-.accordion-header:hover { background: var(--blue-light); }
+.accordion-header:hover { background: var(--primary-light); }
 .accordion-header .arrow {
-    transition: transform 0.3s; font-size: 0.8rem; color: var(--blue);
+    transition: transform var(--transition-slow); font-size: 0.8rem; color: var(--primary);
 }
 .accordion.open .accordion-header .arrow { transform: rotate(90deg); }
 .accordion-body { display: none; padding: 0 20px 20px; }
@@ -58,7 +65,7 @@ pre .copy-btn:hover { background: rgba(255,255,255,0.2); }
     padding: 3px 10px; font-size: 0.78rem;
     font-family: var(--mono);
 }
-.method-ANY { background: var(--orange); }
+.method-ANY { background: var(--warning); color: #1e293b; }
 
 /* --- Flow diagram --- */
 .flow {
@@ -66,23 +73,26 @@ pre .copy-btn:hover { background: rgba(255,255,255,0.2); }
     margin: 16px 0; font-size: 0.85rem;
 }
 .flow-step {
-    background: var(--blue-light); padding: 8px 14px; border-radius: 6px;
-    font-weight: 600; color: var(--blue-dark); white-space: nowrap;
+    background: var(--primary-light); padding: 8px 14px; border-radius: var(--radius-sm);
+    font-weight: 600; color: var(--text); white-space: nowrap;
+    transition: background var(--transition), color var(--transition);
 }
-.flow-arrow { padding: 0 8px; color: var(--gray-text); font-size: 1.2rem; }
-.flow-step.alt { background: #e8ffe8; color: #1a7a1a; }
+.flow-arrow { padding: 0 8px; color: var(--text-muted); font-size: 1.2rem; }
+.flow-step.alt { background: rgba(16, 185, 129, 0.12); color: var(--success); }
+[data-theme="dark"] .flow-step.alt { background: rgba(52, 211, 153, 0.12); color: var(--success); }
 
 /* --- Note box --- */
 .note {
-    background: var(--blue-light); border-left: 4px solid var(--blue);
+    background: var(--primary-light); border-left: 4px solid var(--primary);
     padding: 12px 16px; border-radius: 0 var(--radius) var(--radius) 0;
-    font-size: 0.85rem; margin: 14px 0; color: #004080;
+    font-size: 0.85rem; margin: 14px 0; color: var(--text);
+    transition: background var(--transition), border-color var(--transition), color var(--transition);
 }
 
 /* --- TOC --- */
 .toc { list-style: none; padding: 0; margin: 0; }
 .toc li { margin-bottom: 6px; }
-.toc a { color: var(--blue); text-decoration: none; font-size: 0.9rem; }
+.toc a { color: var(--primary); text-decoration: none; font-size: 0.9rem; transition: color var(--transition); }
 .toc a:hover { text-decoration: underline; }
 
 /* --- Columns --- */
@@ -92,8 +102,12 @@ pre .copy-btn:hover { background: rgba(255,255,255,0.2); }
 /* --- Reference table --- */
 .ref-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin: 10px 0; }
 .ref-table th {
-    text-align: left; padding: 8px 10px; background: var(--blue-light);
-    color: var(--blue-dark); border-bottom: 2px solid var(--blue);
+    text-align: left; padding: 8px 10px; background: var(--surface-inset);
+    color: var(--text-secondary); border-bottom: 2px solid var(--border);
+    transition: background var(--transition), color var(--transition), border-color var(--transition);
 }
-.ref-table td { padding: 8px 10px; border-bottom: 1px solid #eee; vertical-align: top; }
+.ref-table td {
+    padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top;
+    transition: border-color var(--transition);
+}
 .ref-table code { font-size: 0.82em; }

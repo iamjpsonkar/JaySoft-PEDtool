@@ -4,19 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PED Tools</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/common.css">
     <link rel="stylesheet" href="/static/css/index.css">
 </head>
 <body>
     <div class="topbar">
         <h1>PED Tools</h1>
+        <a href="/" class="active">Home</a>
         <a href="/proxy/">Proxy Server</a>
         <a href="/proxy/helper">Docs</a>
         {% if session.get('authenticated') %}
         <a href="/proxy/manage/">Manage</a>
-        <a href="/logout" style="margin-left:auto;opacity:0.8;">Logout</a>
+        <span class="nav-spacer"></span>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+        <a href="/logout" style="opacity:0.8;">Logout</a>
         {% else %}
-        <a href="/login" style="margin-left:auto;">Login</a>
+        <span class="nav-spacer"></span>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+        <a href="/login">Login</a>
         {% endif %}
     </div>
 
@@ -76,5 +83,9 @@
 
     <script src="/static/js/common.js"></script>
     <script src="/static/js/index.js"></script>
+<script>
+(function(){var t=localStorage.getItem('ped-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);document.querySelector('.theme-toggle').textContent=t==='dark'?'☀️':'🌙'})();
+function toggleTheme(){var d=document.documentElement,t=d.getAttribute('data-theme')==='dark'?'light':'dark';d.setAttribute('data-theme',t);localStorage.setItem('ped-theme',t);document.querySelector('.theme-toggle').textContent=t==='dark'?'☀️':'🌙'}
+</script>
 </body>
 </html>

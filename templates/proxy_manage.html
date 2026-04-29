@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PED Tools | Proxy Management</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/common.css">
     <link rel="stylesheet" href="/static/css/proxy-manage.css">
 </head>
@@ -14,7 +15,9 @@
         <a href="/proxy/">Mock Builder</a>
         <a href="/proxy/helper">Docs</a>
         <a href="/">Home</a>
-        <a href="/logout" style="margin-left:auto;opacity:0.8;">Logout</a>
+        <span class="nav-spacer"></span>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+        <a href="/logout">Logout</a>
     </div>
 
     <!-- Status Bar -->
@@ -130,5 +133,9 @@
 
     <script src="/static/js/common.js"></script>
     <script src="/static/js/proxy-manage.js"></script>
+    <script>
+    (function(){var t=localStorage.getItem('ped-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);document.querySelector('.theme-toggle').textContent=t==='dark'?'☀️':'🌙'})();
+    function toggleTheme(){var d=document.documentElement,t=d.getAttribute('data-theme')==='dark'?'light':'dark';d.setAttribute('data-theme',t);localStorage.setItem('ped-theme',t);document.querySelector('.theme-toggle').textContent=t==='dark'?'☀️':'🌙'}
+    </script>
 </body>
 </html>

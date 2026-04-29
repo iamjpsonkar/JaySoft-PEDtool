@@ -1,45 +1,176 @@
-/* === login.html specific styles === */
+/* === login.html — Modern Login Page === */
 
-/* Override body for centered layout */
+/* Centered layout */
 html, body { height: 100%; }
 body {
-    display: flex; align-items: center; justify-content: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background:
+        radial-gradient(ellipse at 20% 50%, var(--primary-glow) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 20%, var(--primary-glow) 0%, transparent 50%),
+        var(--bg);
+    padding: 16px;
+}
+
+/* --- Card entrance animation --- */
+@keyframes cardAppear {
+    from {
+        opacity: 0;
+        transform: translateY(24px) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 }
 
 /* --- Login card --- */
 .login-card {
-    background: var(--white); border-radius: var(--radius);
-    box-shadow: 0 4px 24px rgba(0,0,0,0.1); padding: 40px;
-    width: 100%; max-width: 400px; text-align: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-xl);
+    padding: 44px 40px 36px;
+    width: 100%;
+    max-width: 420px;
+    text-align: center;
+    animation: cardAppear 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+    transition: background var(--transition), border-color var(--transition), box-shadow var(--transition);
 }
+
 .login-card h1 {
-    margin: 0 0 8px; font-size: 1.5rem; color: var(--blue);
+    margin: 0 0 6px;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.02em;
+    transition: color var(--transition);
 }
+
 .login-card p {
-    margin: 0 0 24px; font-size: 0.9rem; color: var(--gray-text);
-}
-
-/* --- Field overrides for login --- */
-.field { margin-bottom: 16px; text-align: left; }
-.field label {
-    margin-bottom: 6px;
-}
-.field input {
-    padding: 10px 14px; font-size: 0.95rem;
-}
-
-/* --- Button override for login (full width) --- */
-.btn {
-    width: 100%; padding: 11px; font-size: 0.95rem;
-}
-.btn:hover { background: var(--blue-dark); }
-
-/* --- Error message --- */
-.error {
-    background: #fde8e8; color: var(--red); padding: 10px 14px;
-    border-radius: 6px; font-size: 0.85rem; margin-bottom: 16px;
-    border: 1px solid #f5c6cb;
+    margin: 0 0 28px;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    transition: color var(--transition);
 }
 
 /* --- Lock icon --- */
-.lock-icon { font-size: 2.5rem; margin-bottom: 12px; }
+.lock-icon {
+    font-size: 2.8rem;
+    margin-bottom: 14px;
+    line-height: 1;
+}
+
+/* --- Field overrides for login --- */
+.field {
+    margin-bottom: 18px;
+    text-align: left;
+}
+
+.field label {
+    margin-bottom: 6px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.field input {
+    padding: 11px 14px;
+    font-size: 0.95rem;
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    transition: all var(--transition);
+}
+
+.field input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+.field input::placeholder {
+    color: var(--text-muted);
+}
+
+/* --- Button override (full width, primary) --- */
+.btn {
+    width: 100%;
+    padding: 12px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    background: var(--primary);
+    color: var(--text-on-primary);
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition);
+    box-shadow: 0 1px 3px rgba(99, 102, 241, 0.3);
+}
+
+.btn:hover {
+    background: var(--primary-hover);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+    transform: translateY(-1px);
+}
+
+.btn:active {
+    transform: scale(0.98) translateY(0);
+}
+
+.btn:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+/* --- Error message --- */
+.error {
+    background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+    color: var(--danger);
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    font-weight: 500;
+    margin-bottom: 18px;
+    border-left: 3px solid var(--danger);
+    text-align: left;
+    line-height: 1.45;
+    animation: cardAppear 0.3s ease both;
+    transition: background var(--transition), color var(--transition);
+}
+
+/* --- Footer links --- */
+.login-footer {
+    margin-top: 24px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+    transition: border-color var(--transition);
+}
+
+.login-footer a {
+    font-size: 0.85rem;
+    color: var(--primary);
+    text-decoration: none;
+    font-weight: 500;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    transition: all var(--transition);
+}
+
+.login-footer a:hover {
+    background: var(--primary-light);
+    color: var(--primary-hover);
+}
+
+/* --- Responsive --- */
+@media (max-width: 480px) {
+    .login-card {
+        padding: 32px 24px 28px;
+    }
+}

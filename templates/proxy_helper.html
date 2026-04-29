@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PED Tools | API Documentation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/common.css">
     <link rel="stylesheet" href="/static/css/proxy-helper.css">
 </head>
@@ -14,9 +15,13 @@
         <a href="/">Home</a>
         {% if session.get('authenticated') %}
         <a href="/proxy/manage/">Manage</a>
-        <a href="/logout" style="margin-left:auto;opacity:0.8;">Logout</a>
+        {% endif %}
+        <span class="nav-spacer"></span>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+        {% if session.get('authenticated') %}
+        <a href="/logout">Logout</a>
         {% else %}
-        <a href="/login" style="margin-left:auto;">Login</a>
+        <a href="/login">Login</a>
         {% endif %}
     </div>
 
@@ -78,6 +83,15 @@
                 <li><a href="#ep-history-clear">POST /proxy/history/&lt;identifier&gt;/clear/</a> &mdash; Clear request history</li>
                 <li><a href="#ep-ratelimit">GET /proxy/ratelimit/&lt;identifier&gt;/</a> &mdash; Get rate limit status</li>
                 <li><a href="#ep-health">GET /health</a> &mdash; Health check</li>
+            </ul>
+
+            <h3>State &amp; Storage</h3>
+            <ul class="toc">
+                <li><a href="#state-api">State API (CRUD)</a> &mdash; Read, write, merge, clear per-proxy state</li>
+                <li><a href="#state-store">_store (Write)</a> &mdash; Write to state from mock responses</li>
+                <li><a href="#state-dbget">dbget (Read)</a> &mdash; Read state values in responses</li>
+                <li><a href="#state-staging">Staging Pattern</a> &mdash; Generate ID, store data, return in response</li>
+                <li><a href="#state-recipes">Recipes</a> &mdash; Login, wallet, orders, gift cards</li>
             </ul>
 
             <h3>Advanced Features</h3>
@@ -240,6 +254,260 @@ curl http://localhost:8000/proxy/payments-v2/orders/123/status</pre>
             </div>
         </div>
 
+        <!-- ================================================================ -->
+        <!-- State & Storage                                                -->
+        <!-- ================================================================ -->
+
+        <div class="card" id="state-api">
+            <h2>State API</h2>
+            <p>Each proxy has a <strong>state</strong> &mdash; a JSON object stored in SQLite. Use it to make mocks remember data between requests (wallets, orders, tokens, etc.).</p>
+
+            <table class="ref-table">
+                <tr><th>Action</th><th>Method</th><th>URL</th><th>Body</th></tr>
+                <tr><td>Read</td><td><span class="method-badge method-GET">GET</span></td><td><code>/proxy/state/&lt;id&gt;/</code></td><td>&mdash;</td></tr>
+                <tr><td>Replace</td><td><span class="method-badge method-PUT">PUT</span></td><td><code>/proxy/state/&lt;id&gt;/</code></td><td>JSON object</td></tr>
+                <tr><td>Merge</td><td><span class="method-badge method-PATCH">PATCH</span></td><td><code>/proxy/state/&lt;id&gt;/</code></td><td>JSON object (shallow merge)</td></tr>
+                <tr><td>Clear</td><td><span class="method-badge method-DELETE">DELETE</span></td><td><code>/proxy/state/&lt;id&gt;/</code></td><td>&mdash;</td></tr>
+            </table>
+
+            <p><strong>Seed state before first use:</strong></p>
+<pre>curl -X PUT '/proxy/state/myproxy/' \
+  -H 'Content-Type: application/json' \
+  -d '{"wallet": {"bonus": 2000}, "orders": {}, "tokens": {}}'</pre>
+        </div>
+
+        <div class="card" id="state-store">
+            <h2>_store &mdash; Writing to State</h2>
+            <p>Add a <code>_store</code> key to any mock response. It runs as a side-effect <strong>before</strong> the response body is resolved, then gets removed from the response.</p>
+
+            <h3>Operation shapes</h3>
+            <table class="ref-table">
+                <tr><th>Shape</th><th>Example</th><th>Effect</th></tr>
+                <tr><td>Set by path</td><td><code>{"path": "a.b.c", "value": "hello"}</code></td><td>state.a.b.c = "hello"</td></tr>
+                <tr><td>Set by collection+key</td><td><code>{"collection": "orders", "key": "ORD1", "value": {...}}</code></td><td>state.orders.ORD1 = {...}</td></tr>
+                <tr><td>Delete</td><td><code>{"path": "tokens.alice", "delete": true}</code></td><td>Removes state.tokens.alice</td></tr>
+            </table>
+
+            <h3>Single operation</h3>
+<pre>{
+  "_store": {"path": "counter", "value": 42},
+  "message": "stored"
+}</pre>
+
+            <h3>Multiple operations</h3>
+<pre>{
+  "_store": [
+    {"path": "user.name", "value": "jsonget(name)"},
+    {"path": "user.lastLogin", "value": "now()"}
+  ],
+  "result": "ok"
+}</pre>
+
+            <h3>Dynamic paths &amp; values</h3>
+            <p>Both <code>path</code> and <code>value</code> support all resolvers:</p>
+<pre>{
+  "_store": [
+    {"path": "orders.jsonget(orderId).status", "value": "CREATED"},
+    {"path": "orders.jsonget(orderId).amount", "value": "jsonget(amount)"},
+    {"path": "wallet.bonus", "value": "snippet(max(0, dbget('wallet.bonus', 0) - jsonget('amount', 0)))"}
+  ]
+}</pre>
+
+            <div class="note">
+                <strong>Execution order:</strong> _store runs and commits to DB <em>before</em> the response body is resolved. This means <code>dbget()</code> in the body always sees what <code>_store</code> just wrote.
+            </div>
+        </div>
+
+        <div class="card" id="state-dbget">
+            <h2>dbget &mdash; Reading from State</h2>
+
+            <h3>Standalone resolver (in response values)</h3>
+<pre>{
+  "balance": "dbget(wallet.bonus, 0)",
+  "name": "dbget(user.name, anonymous)"
+}</pre>
+            <div class="note"><strong>No quotes</strong> around args in standalone <code>dbget()</code>. Default is always returned as a string.</div>
+
+            <h3>Inside snippet() (for types &amp; arithmetic)</h3>
+<pre>{
+  "balance": "snippet(dbget('wallet.bonus', 0))",
+  "enough": "snippet(dbget('wallet.bonus', 0) >= jsonget('amount', 0))",
+  "total": "snippet(dbget('wallet.bonus', 0) + dbget('wallet.rcs', 0))"
+}</pre>
+            <div class="note">Inside <code>snippet()</code>, use Python quotes around string args. Types are preserved (int, bool, etc.).</div>
+
+            <h3>When to use which</h3>
+            <table class="ref-table">
+                <tr><th>Need</th><th>Syntax</th></tr>
+                <tr><td>Simple string read</td><td><code>"dbget(user.name, guest)"</code></td></tr>
+                <tr><td>Numeric value</td><td><code>"snippet(dbget('balance', 0))"</code></td></tr>
+                <tr><td>Arithmetic</td><td><code>"snippet(dbget('balance', 0) - jsonget('amount', 0))"</code></td></tr>
+                <tr><td>Comparison</td><td><code>"snippet(dbget('balance', 0) >= 100)"</code></td></tr>
+            </table>
+        </div>
+
+        <div class="card" id="state-staging">
+            <h2>Staging Pattern (lastId)</h2>
+            <p>The most important pattern for stateful mocks. Use it when you need to generate a random ID, store data under it, and return it in the response.</p>
+
+            <h3>Problem</h3>
+            <p><code>alnum()</code> generates a <strong>different</strong> value each time. You can't use the same <code>alnum()</code> in both path and response.</p>
+
+            <h3>Solution: stage then reference</h3>
+<pre>{
+  "_store": [
+    {"path": "lastOrderId", "value": "alnum(8,4)"},
+    {"path": "orders.dbget(lastOrderId).status", "value": "CREATED"},
+    {"path": "orders.dbget(lastOrderId).amount", "value": "jsonget(amount)"}
+  ],
+  "orderId": "snippet(dbget('lastOrderId'))",
+  "status": "CREATED"
+}</pre>
+
+            <p><strong>How it works:</strong></p>
+            <ol>
+                <li>Op 1: <code>alnum(8,4)</code> generates e.g. <code>"AbCdEfGh1234"</code>, stored at <code>state.lastOrderId</code></li>
+                <li>Op 2: <code>dbget(lastOrderId)</code> resolves to <code>"AbCdEfGh1234"</code> &mdash; path becomes <code>orders.AbCdEfGh1234.status</code></li>
+                <li>After _store commits, body resolves: <code>snippet(dbget('lastOrderId'))</code> reads back <code>"AbCdEfGh1234"</code></li>
+            </ol>
+
+            <div class="note">
+                <strong>Path template rule:</strong> In <code>_store</code> paths, <strong>do NOT use quotes</strong> around resolver args: <code>dbget(lastOrderId)</code> not <code>dbget('lastOrderId')</code>. Quotes become part of the key name.
+                <br>In <code>snippet()</code> expressions, <strong>do use quotes</strong> (Python syntax): <code>dbget('lastOrderId', '')</code>.
+            </div>
+
+            <h3>Nested body fields (dotted args workaround)</h3>
+            <p>Path templates split on <code>.</code> naively. <code>jsonget(giftcard.cardNumber)</code> in a path breaks. Stage it first:</p>
+<pre>"_store": [
+  {"path": "lastCard", "value": "snippet(str(jsonget('giftcard.cardNumber')))"},
+  {"path": "cards.dbget(lastCard).redeemed", "value": true}
+]</pre>
+        </div>
+
+        <div class="card" id="state-recipes">
+            <h2>Storage Recipes</h2>
+
+            <h3>Login with token storage</h3>
+            <p><strong>Seed:</strong> <code>PUT /proxy/state/myproxy/ {"tokens": {}}</code></p>
+<pre>{
+  "conditions": [],
+  "responses": [{
+    "when": [
+      {"field": "username", "operator": "exists", "source": "json"},
+      {"field": "password", "operator": "exists", "source": "json"}
+    ],
+    "then": {
+      "_store": [
+        {"path": "tokens.jsonget(username).accessToken", "value": "alnum(16,16)"},
+        {"path": "tokens.jsonget(username).refreshToken", "value": "alnum(16,16)"}
+      ],
+      "body": {
+        "accessToken": "snippet(dbget('tokens.' + jsonget('username') + '.accessToken'))",
+        "refreshToken": "snippet(dbget('tokens.' + jsonget('username') + '.refreshToken'))",
+        "expiresIn": 3600
+      },
+      "status_code": 200
+    }
+  }],
+  "default": {"body": {"error": "Missing credentials"}, "status_code": 400}
+}</pre>
+
+            <h3>Wallet balance (deduct on payment)</h3>
+            <p><strong>Seed:</strong> <code>PUT /proxy/state/myproxy/ {"wallet": {"bonus": 2000}}</code></p>
+<pre>// Read balance:
+{"balance": "snippet(dbget('wallet.bonus', 0))"}
+
+// Deduct:
+{
+  "_store": [
+    {"path": "wallet.bonus", "value": "snippet(max(0, dbget('wallet.bonus', 0) - jsonget('amount', 0)))"}
+  ],
+  "newBalance": "snippet(dbget('wallet.bonus', 0))"
+}
+
+// Add back (refund):
+{
+  "_store": [
+    {"path": "wallet.bonus", "value": "snippet(dbget('wallet.bonus', 0) + jsonget('amount', 0))"}
+  ],
+  "newBalance": "snippet(dbget('wallet.bonus', 0))"
+}</pre>
+
+            <h3>Create + Lookup (order system)</h3>
+            <p><strong>Seed:</strong> <code>PUT /proxy/state/myproxy/ {"orders": {}}</code></p>
+<pre>// Create order (POST):
+{
+  "_store": [
+    {"path": "lastOrderId", "value": "alnum(8,4)"},
+    {"path": "orders.dbget(lastOrderId).amount", "value": "jsonget(amount, 0)"},
+    {"path": "orders.dbget(lastOrderId).status", "value": "CREATED"}
+  ],
+  "orderId": "snippet(dbget('lastOrderId'))"
+}
+
+// Lookup order (POST) — 200 if found, 404 if not:
+{
+  "conditions": [],
+  "responses": [{
+    "when": [{"source": "snippet",
+      "value": "dbget('orders.' + jsonget('orderId', '__NO__'), '__NO__') != '__NO__'"}],
+    "then": {
+      "orderId": "jsonget(orderId)",
+      "amount": "snippet(dbget('orders.' + jsonget('orderId') + '.amount', 0))",
+      "status": "snippet(dbget('orders.' + jsonget('orderId') + '.status', 'UNKNOWN'))"
+    }
+  }],
+  "default": {"body": {"error": "Order not found"}, "status_code": 404}
+}</pre>
+
+            <h3>Token refresh with rotation</h3>
+            <p><strong>Key:</strong> Stage the username before rotating, so the body can find it after tokens change.</p>
+<pre>{
+  "conditions": [],
+  "responses": [{
+    "when": [{"source": "snippet", "value": "valid_refresh_token(jsonget('refreshToken', ''))"}],
+    "then": {
+      "_store": [
+        {"path": "lastRefreshUser", "value": "snippet(str(refresh_token_user(jsonget('refreshToken'))))"},
+        {"path": "tokens.dbget(lastRefreshUser).accessToken", "value": "alnum(16,16)"},
+        {"path": "tokens.dbget(lastRefreshUser).refreshToken", "value": "alnum(16,16)"}
+      ],
+      "body": {
+        "accessToken": "snippet(dbget('tokens.' + dbget('lastRefreshUser', '') + '.accessToken'))",
+        "refreshToken": "snippet(dbget('tokens.' + dbget('lastRefreshUser', '') + '.refreshToken'))"
+      },
+      "status_code": 200
+    }
+  }],
+  "default": {"body": {"error": "Invalid refresh token"}, "status_code": 401}
+}</pre>
+
+            <h3>Double-redeem prevention</h3>
+            <p><strong>Seed:</strong> <code>PUT /proxy/state/myproxy/ {"giftcards": {}, "wallet": {"bonus": 2000}}</code></p>
+<pre>{
+  "conditions": [],
+  "responses": [
+    {
+      "when": [{"source": "snippet",
+        "value": "dbget('giftcards.' + str(jsonget('cardNumber', '__NONE__')) + '.redeemed', False) == True"}],
+      "then": {"body": {"error": "Card already redeemed"}, "status_code": 400}
+    },
+    {
+      "when": [{"field": "cardNumber", "operator": "exists", "source": "json"}],
+      "then": {
+        "_store": [
+          {"path": "lastCard", "value": "snippet(str(jsonget('cardNumber')))"},
+          {"path": "giftcards.dbget(lastCard).redeemed", "value": true},
+          {"path": "wallet.bonus", "value": "snippet(dbget('wallet.bonus', 0) + 500)"}
+        ],
+        "body": {"amount": 500, "message": "Redeemed"}, "status_code": 200
+      }
+    }
+  ],
+  "default": {"body": {"error": "Invalid card"}, "status_code": 400}
+}</pre>
+        </div>
+
         <!-- Placeholders Reference -->
         <div class="card" id="placeholders">
             <h2>Dynamic Placeholders</h2>
@@ -301,16 +569,37 @@ curl http://localhost:8000/proxy/payments-v2/orders/123/status</pre>
                     <td>aBc12dEfG3</td>
                 </tr>
                 <tr>
+                    <td><code>dbget(path, default)</code></td>
+                    <td>Read from proxy state</td>
+                    <td><code>dbget(wallet.bonus, 0)</code></td>
+                    <td>2000</td>
+                </tr>
+                <tr>
+                    <td><code>now()</code></td>
+                    <td>ISO 8601 UTC timestamp</td>
+                    <td><code>now()</code> or <code>now(+3600)</code></td>
+                    <td>2026-04-29T12:00:00Z</td>
+                </tr>
+                <tr>
+                    <td><code>now_epoch()</code></td>
+                    <td>Unix epoch (seconds)</td>
+                    <td><code>now_epoch()</code></td>
+                    <td>1777593600.0</td>
+                </tr>
+                <tr>
                     <td><code>snippet(expr)</code></td>
                     <td>Evaluate safe Python expression</td>
-                    <td><code>snippet(len("hello"))</code></td>
-                    <td>5</td>
+                    <td><code>snippet(dbget('balance',0) + 100)</code></td>
+                    <td>2100</td>
                 </tr>
             </table>
 
             <div class="note">
-                <strong>snippet()</strong> runs in a sandboxed evaluator. Only safe builtins are available
-                (abs, int, str, len, min, max, sorted, range, etc.). No imports, file I/O, or exec allowed.
+                <strong>snippet()</strong> runs in a sandboxed evaluator. Available builtins:
+                abs, int, float, str, len, min, max, round, sum, sorted, list, dict, bool, range.
+                <br>Available context functions: jsonget(), dbget(), headerget(), paramget(),
+                now(), now_epoch(), upper(), lower(), digit(), alnum(), valid_token(),
+                refresh_token_user(), verify_password(), bearer_token().
             </div>
         </div>
 
@@ -1059,5 +1348,9 @@ curl http://localhost:8000/proxy/payments-v2/orders/123/status</pre>
     </div>
 
     <script src="/static/js/proxy-helper.js"></script>
+    <script>
+    (function(){var t=localStorage.getItem('ped-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);document.querySelector('.theme-toggle').textContent=t==='dark'?'☀️':'🌙'})();
+    function toggleTheme(){var d=document.documentElement,t=d.getAttribute('data-theme')==='dark'?'light':'dark';d.setAttribute('data-theme',t);localStorage.setItem('ped-theme',t);document.querySelector('.theme-toggle').textContent=t==='dark'?'☀️':'🌙'}
+    </script>
 </body>
 </html>

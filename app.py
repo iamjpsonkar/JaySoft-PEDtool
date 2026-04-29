@@ -2544,6 +2544,218 @@ def export_proxy(identifier):
     return jsonify(export_data)
 
 
+@app.route("/proxy/export/<identifier>/postman/", methods=["GET"])
+@log_access
+def export_postman(identifier):
+    """Export a Postman v2.1 collection for all mocks of a proxy.
+
+    Each mock endpoint+method becomes a request item. The collection uses
+    a ``base_url`` variable so the user can switch between environments.
+    """
+    proxy = db_get_proxy(identifier)
+    if not proxy:
+        logger.warning("[EXPORT] Postman export failed — proxy '%s' not found", identifier)
+        return jsonify({"error": "Proxy not found"}), 404
+
+    mocked = proxy.get("mocked_requests", {})
+    base_url = request.host_url.rstrip("/")
+    proxy_base = f"{base_url}/proxy/{identifier}"
+    collection_id = str(_uuid.uuid4())
+
+    parsed_base = urlparse(base_url)
+    host_part = parsed_base.netloc
+    protocol = parsed_base.scheme or "https"
+
+    items = []
+    for endpoint, methods in sorted(mocked.items()):
+        endpoint_clean = endpoint.lstrip("/")
+        for method_name, mock_body in sorted(methods.items()):
+            # Build a readable name
+            item_name = f"{method_name} /{endpoint_clean}"
+
+            # Determine if the mock expects a JSON body (POST/PUT/PATCH/DELETE with conditions or _store)
+            has_body = method_name in ("POST", "PUT", "PATCH", "DELETE")
+
+            # Build request URL parts
+            raw_url = f"{proxy_base}/{endpoint_clean}"
+            path_parts = ["proxy", identifier] + endpoint_clean.split("/")
+
+            req_url = {
+                "raw": raw_url,
+                "protocol": protocol,
+                "host": host_part.split("."),
+                "path": path_parts,
+            }
+
+            # Build example body from mock structure hints
+            example_body = _postman_example_body(mock_body)
+            logger.debug("[EXPORT] Postman item: %s %s body_keys=%s",
+                         method_name, endpoint, list(example_body.keys()) if isinstance(example_body, dict) else "N/A")
+
+            item = {
+                "name": item_name,
+                "request": {
+                    "method": method_name,
+                    "header": [
+                        {"key": "Content-Type", "value": "application/json", "type": "text"},
+                    ],
+                    "url": req_url,
+                },
+                "response": [],
+            }
+
+            if has_body and example_body:
+                item["request"]["body"] = {
+                    "mode": "raw",
+                    "raw": json.dumps(example_body, indent=2),
+                    "options": {"raw": {"language": "json"}},
+                }
+
+            items.append(item)
+
+    # Also add the State API endpoints for this proxy
+    state_url_base = f"{base_url}/proxy/state/{identifier}/"
+    state_url_obj = {"raw": state_url_base, "protocol": protocol,
+                     "host": host_part.split("."), "path": ["proxy", "state", identifier, ""]}
+    state_items = [
+        {
+            "name": f"GET State ({identifier})",
+            "request": {"method": "GET", "header": [], "url": state_url_obj},
+            "response": [],
+        },
+        {
+            "name": f"PUT State ({identifier})",
+            "request": {
+                "method": "PUT",
+                "header": [{"key": "Content-Type", "value": "application/json", "type": "text"}],
+                "url": state_url_obj,
+                "body": {"mode": "raw", "raw": json.dumps({"key": "value"}, indent=2), "options": {"raw": {"language": "json"}}},
+            },
+            "response": [],
+        },
+        {
+            "name": f"PATCH State ({identifier})",
+            "request": {
+                "method": "PATCH",
+                "header": [{"key": "Content-Type", "value": "application/json", "type": "text"}],
+                "url": state_url_obj,
+                "body": {"mode": "raw", "raw": json.dumps({"key": "value"}, indent=2), "options": {"raw": {"language": "json"}}},
+            },
+            "response": [],
+        },
+    ]
+
+    collection = {
+        "info": {
+            "_postman_id": collection_id,
+            "name": f"PED Mock — {identifier}",
+            "description": f"Auto-generated Postman collection for proxy '{identifier}'.\n\nAPI Domain: {proxy['api_domain']}\nGenerated: {datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')}",
+            "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+        },
+        "item": [
+            {
+                "name": "Mock Endpoints",
+                "item": items,
+            },
+            {
+                "name": "State Management",
+                "item": state_items,
+            },
+        ],
+        "variable": [
+            {"key": "base_url", "value": base_url, "type": "string"},
+        ],
+    }
+
+    logger.info("[EXPORT] Postman collection for '%s': %d mock items, %d state items",
+                identifier, len(items), len(state_items))
+
+    resp = Response(
+        json.dumps(collection, indent=2),
+        mimetype="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="ped-{identifier}-postman.json"',
+        },
+    )
+    return resp
+
+
+def _postman_example_body(mock_data) -> dict:
+    """Build a reasonable example request body from mock structure hints.
+
+    Scans conditions, jsonget() references, and _store paths to infer
+    which fields the endpoint expects in the request body.
+    """
+    fields = {}
+
+    if not isinstance(mock_data, dict):
+        return fields
+
+    # Scan conditions for json-source fields
+    for resp in mock_data.get("responses", []):
+        for cond in resp.get("when", []):
+            source = cond.get("source", "json")
+            if source in ("json", "json_body") and cond.get("field"):
+                field_name = cond["field"]
+                example = cond.get("value", "")
+                if cond.get("operator") in ("exists", "not_exists"):
+                    example = f"example_{field_name}"
+                fields[field_name] = example or f"example_{field_name}"
+
+            # snippet conditions: extract jsonget('field') references
+            if source == "snippet":
+                expr = cond.get("value", "")
+                for match in re.finditer(r"jsonget\(['\"]([^'\"]+)['\"]", expr):
+                    fname = match.group(1)
+                    if fname not in ("__NO__",):
+                        fields[fname] = f"example_{fname}"
+
+    # Scan _store for jsonget references in paths and values
+    store_ops = mock_data.get("_store", [])
+    if isinstance(store_ops, dict):
+        store_ops = [store_ops]
+    if isinstance(store_ops, list):
+        for op in store_ops:
+            if not isinstance(op, dict):
+                continue
+            for key in ("path", "value", "key"):
+                val = op.get(key, "")
+                if isinstance(val, str):
+                    for match in re.finditer(r"jsonget\(([^,)]+)", val):
+                        fname = match.group(1).strip("'\" ")
+                        if fname and fname not in ("__NO__",):
+                            fields[fname] = f"example_{fname}"
+
+    # Scan the then block too
+    for resp in mock_data.get("responses", []):
+        then = resp.get("then", {})
+        if isinstance(then, dict):
+            for sops in [then.get("_store", [])]:
+                if isinstance(sops, dict):
+                    sops = [sops]
+                if isinstance(sops, list):
+                    for op in sops:
+                        if not isinstance(op, dict):
+                            continue
+                        for key in ("path", "value", "key"):
+                            val = op.get(key, "")
+                            if isinstance(val, str):
+                                for match in re.finditer(r"jsonget\(([^,)]+)", val):
+                                    fname = match.group(1).strip("'\" ")
+                                    if fname and fname not in ("__NO__",):
+                                        fields[fname] = f"example_{fname}"
+
+    # Also scan top-level value strings for jsonget
+    for val in mock_data.values():
+        if isinstance(val, str):
+            for match in re.finditer(r"jsonget\(([^,)]+)", val):
+                fname = match.group(1).strip("'\" ")
+                if fname and fname not in ("__NO__", "_store", "conditions", "responses", "default"):
+                    fields[fname] = f"example_{fname}"
+
+    return fields
+
+
 @app.route("/proxy/export/all/", methods=["GET"])
 @log_access
 @require_auth

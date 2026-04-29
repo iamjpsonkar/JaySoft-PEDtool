@@ -44,6 +44,8 @@ A Flask-based HTTP proxy, mock server, and AES encryption utility with a full we
 | **Rate limiting** | In-memory, per-proxy, configurable via env vars |
 | **Domain allowlist** | Restrict proxy targets to approved hostnames (exact-host or suffix match) |
 | **Import / Export / Clone** | Move proxy configs and mocks between environments as JSON |
+| **Postman export** | One-click download of a Postman v2.1 collection for any proxy's mocks |
+| **Dark / Light mode** | System-preference-aware theme toggle, persisted across sessions |
 | **UI + API auth** | Session login (browser) or Bearer token (API) |
 
 ---
@@ -237,13 +239,20 @@ State is stored in SQLite (`proxy_state` table). Used by `dbget()`, `_store` sid
 
 ---
 
-### Import / Export
+### Import / Export / Postman
 
 ```
-GET  /proxy/export/<id>/     single proxy (mocks included)
-GET  /proxy/export/all/      all proxies
-POST /proxy/import/          accepts {identifier,...} or {proxies:{...}} bulk format
+GET  /proxy/export/<id>/            single proxy (mocks included)
+GET  /proxy/export/<id>/postman/    Postman v2.1 collection (downloadable)
+GET  /proxy/export/all/             all proxies
+POST /proxy/import/                 accepts {identifier,...} or {proxies:{...}} bulk format
 ```
+
+The Postman export generates a ready-to-import collection with:
+- A request item for every registered mock (method + endpoint)
+- Auto-inferred example request bodies from `jsonget()` references
+- State Management folder (GET/PUT/PATCH state endpoints)
+- Available from the **Postman** button in the Manage dashboard and Mock Builder
 
 ---
 
@@ -415,6 +424,8 @@ Each proxy has a persistent key-value store in SQLite (`proxy_state` table).
 
 Token helpers (`valid_token`, `token_user`, `bearer_token`) are built around the `tokens.<username>` shape.
 
+> **Comprehensive storage guide:** See [`STORAGE_GUIDE.md`](STORAGE_GUIDE.md) for detailed recipes, gotchas, and patterns (login flows, wallets, order systems, token rotation, double-redeem prevention).
+
 ---
 
 ## Conditional Mocks
@@ -514,6 +525,12 @@ DELETE /proxy/users/<id>/<user>/  delete user
 **Export single proxy:**
 ```bash
 curl -H 'Authorization: Bearer $TOKEN' http://localhost:8000/proxy/export/myproxy/
+```
+
+**Export as Postman collection:**
+```bash
+curl -o myproxy-postman.json http://localhost:8000/proxy/export/myproxy/postman/
+# Import into Postman: File → Import → drop the JSON file
 ```
 
 **Export all:**
