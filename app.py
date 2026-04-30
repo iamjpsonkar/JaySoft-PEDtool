@@ -3231,6 +3231,33 @@ def proxy_request(identifier, endpoint):
             )
             return jsonify(processed), 200
 
+        # --- Mock-only mode ---
+        # When enabled, unmatched requests return 501 instead of forwarding
+        # upstream. The caller should fall back to calling the real API directly
+        # (from its own IP, which may be whitelisted at the target).
+        # Enable via: identifier suffix _MOCKONLY, or state flag _mock_only: true.
+        _is_mock_only = identifier.endswith("_MOCKONLY")
+        if not _is_mock_only:
+            proxy_state = db_get_state(identifier)
+            _is_mock_only = proxy_state.get("_mock_only", False) is True
+
+        if _is_mock_only:
+            duration_ms = int((time.time() - start_time) * 1000)
+            logger.info("[MOCK MISS] mock_only=true — returning 501 for %s %s/%s",
+                        method, identifier, endpoint)
+            db_log_request(
+                identifier, endpoint, method, req_headers, req_body, query_string,
+                501, '{"error":"not_mocked"}', "mock_miss", duration_ms,
+            )
+            return jsonify({
+                "error": "No mock registered for this endpoint",
+                "mock_only": True,
+                "proxy_id": identifier,
+                "method": method,
+                "endpoint": f"/{endpoint}",
+                "api_domain": api_domain,
+            }), 501
+
         # --- SSRF guard ---
         if not _is_domain_allowed(api_domain):
             return jsonify({"error": "Target domain not allowed"}), 403

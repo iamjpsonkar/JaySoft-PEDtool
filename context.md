@@ -478,6 +478,34 @@ Common log prefixes:
 
 ## 23. Changelog (recent)
 
+### 2026-04-30 — Mock-only mode (skip upstream forwarding)
+
+**Problem:** Proxy server IP is not whitelisted at upstream APIs (e.g., Juspay). When no mock matches, the proxy forwards the request from its own IP → upstream blocks it.
+
+**Solution:** Mock-only mode. When enabled, unmatched requests return `501 Not Implemented` with a structured JSON response instead of forwarding upstream. The calling service detects the 501 and falls back to calling the upstream API directly (from its own whitelisted IP).
+
+**How to enable (two options):**
+1. **State flag:** `PATCH /proxy/state/<id>/ {"_mock_only": true}` — toggle on any existing proxy
+2. **Suffix:** register identifier as `<name>_MOCKONLY` — like `_REDIRECT` convention
+
+**501 response shape:**
+```json
+{
+  "error": "No mock registered for this endpoint",
+  "mock_only": true,
+  "proxy_id": "juspay",
+  "method": "POST",
+  "endpoint": "/orders",
+  "api_domain": "https://api.juspay.in"
+}
+```
+
+**History source:** logged as `mock_miss` in request history.
+
+**Execution order in proxy_request:** mock-only check runs after mock lookup fails, before SSRF guard and upstream forward.
+
+---
+
 ### 2026-04-29 — Postman collection export + UI font contrast fix
 
 **New endpoint:** `GET /proxy/export/<identifier>/postman/`
