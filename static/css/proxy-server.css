@@ -1,5 +1,14 @@
 /* === proxy_server.html specific styles === */
 
+/* --- Mock Diff View (Feature 10) --- */
+.mock-diff { font-family: var(--mono); font-size: 0.82rem; line-height: 1.6; }
+.diff-added { color: var(--success); padding: 2px 6px; border-left: 3px solid var(--success); margin: 2px 0; }
+.diff-removed { color: var(--danger); padding: 2px 6px; border-left: 3px solid var(--danger); margin: 2px 0; text-decoration: line-through; }
+.diff-changed { padding: 2px 6px; border-left: 3px solid var(--warning); margin: 2px 0; }
+.diff-path { color: var(--primary); font-weight: 600; }
+.diff-old { color: var(--danger); }
+.diff-new { color: var(--success); }
+
 /* --- Status bar --- */
 .status-bar {
     background: var(--surface); border-bottom: 1px solid var(--border);

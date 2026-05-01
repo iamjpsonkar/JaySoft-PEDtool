@@ -91,6 +91,24 @@ CREATE TABLE IF NOT EXISTS proxy_users (
     PRIMARY KEY (proxy_id, username)
 );
 
+CREATE TABLE IF NOT EXISTS state_snapshots (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    proxy_id    TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    data        TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_snapshots_proxy ON state_snapshots(proxy_id);
+
+CREATE TABLE IF NOT EXISTS mock_templates (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,
+    description TEXT,
+    template    TEXT NOT NULL,
+    category    TEXT NOT NULL DEFAULT 'general',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 """
 
 

@@ -64,6 +64,13 @@ FORWARD_TIMEOUT = int(os.environ.get("PED_FORWARD_TIMEOUT", "30"))
 REQUEST_HISTORY_LIMIT = int(os.environ.get("PED_HISTORY_LIMIT", "100"))
 UI_PASSWORD = os.environ.get("PED_UI_PASSWORD", "")  # empty = no login required
 
+# CORS — comma-separated origins; empty=disabled, *=allow all
+CORS_ORIGINS = os.environ.get("PED_CORS_ORIGINS", "")
+# Environment variable resolver prefix — only vars matching this prefix are exposed
+MOCK_ENV_PREFIX = os.environ.get("PED_MOCK_ENV_PREFIX", "MOCK_")
+# Max state snapshots per proxy
+MAX_SNAPSHOTS_PER_PROXY = int(os.environ.get("PED_MAX_SNAPSHOTS", "20"))
+
 _SECRET_KEY_DEV_FALLBACK = "ped-tools-dev-secret-DO-NOT-USE-IN-PROD"
 _secret_key = os.environ.get("PED_SECRET_KEY", "")
 if not _secret_key:
@@ -87,7 +94,36 @@ def _set_security_headers(response):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+
+    # CORS headers
+    cors_origins = CORS_ORIGINS
+    # Per-proxy override: check state key _cors_origins if we're in a proxy route
+    if hasattr(g, "_proxy_cors_origins"):
+        cors_origins = g._proxy_cors_origins
+    if cors_origins:
+        origin = request.headers.get("Origin", "")
+        if cors_origins.strip() == "*":
+            response.headers["Access-Control-Allow-Origin"] = "*"
+        elif origin:
+            allowed = [o.strip() for o in cors_origins.split(",") if o.strip()]
+            if origin in allowed:
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Vary"] = "Origin"
+        response.headers.setdefault(
+            "Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS"
+        )
+        response.headers.setdefault(
+            "Access-Control-Allow-Headers", "Content-Type, Authorization, X-Mock-Method"
+        )
+        response.headers.setdefault("Access-Control-Max-Age", "86400")
     return response
+
+
+@app.route("/proxy/<identifier>/<path:endpoint>", methods=["OPTIONS"])
+def _cors_preflight(identifier, endpoint):
+    """Handle CORS preflight requests with 204 No Content."""
+    logger.debug("[CORS] Preflight for /%s/%s", identifier, endpoint)
+    return Response(status=204)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -318,6 +354,9 @@ def _ensure_schema_ready() -> None:
 
     Run `python bootstrap.py` (or `./run.sh`, which calls it) before starting
     the app. This keeps first-time setup out of import-time side effects.
+
+    Also auto-migrates schema additions (tags column, new tables) so that
+    existing deployments do not need a manual re-bootstrap.
     """
     must_exist = ("proxies", "mocks", "request_history", "mock_sequences")
     try:
@@ -344,6 +383,44 @@ def _ensure_schema_ready() -> None:
             f"DB at {DB_PATH} is missing tables: {', '.join(missing)}. "
             f"Run `python bootstrap.py` first."
         )
+
+    # Auto-migrate: add tags column to mocks if missing
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(mocks)").fetchall()}
+        if "tags" not in cols:
+            conn.execute("ALTER TABLE mocks ADD COLUMN tags TEXT DEFAULT ''")
+            conn.commit()
+            logger.info("[STARTUP] Added 'tags' column to mocks table")
+        # Auto-create state_snapshots table
+        if "state_snapshots" not in present:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS state_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    proxy_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    data TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_snapshots_proxy ON state_snapshots(proxy_id);
+            """)
+            logger.info("[STARTUP] Created state_snapshots table")
+        # Auto-create mock_templates table
+        if "mock_templates" not in present:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS mock_templates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    description TEXT,
+                    template TEXT NOT NULL,
+                    category TEXT NOT NULL DEFAULT 'general',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+            """)
+            logger.info("[STARTUP] Created mock_templates table")
+    finally:
+        conn.close()
+
     logger.info("[STARTUP] schema ok db_path=%s tables=%d", DB_PATH, len(present))
 
 
@@ -553,13 +630,47 @@ def db_log_request(
     db.commit()
 
 
-def db_get_request_history(proxy_id: str, limit: int = 50) -> list[dict]:
-    """Get recent request history for a proxy."""
+def db_get_request_history(
+    proxy_id: str,
+    limit: int = 50,
+    method: str | None = None,
+    endpoint: str | None = None,
+    status_min: int | None = None,
+    status_max: int | None = None,
+    source: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> list[dict]:
+    """Get recent request history for a proxy with optional filters."""
     db = _get_db()
-    rows = db.execute(
-        "SELECT * FROM request_history WHERE proxy_id = ? ORDER BY id DESC LIMIT ?",
-        (proxy_id, limit),
-    ).fetchall()
+    clauses = ["proxy_id = ?"]
+    params: list = [proxy_id]
+    if method:
+        clauses.append("method = ?")
+        params.append(method.upper())
+    if endpoint:
+        clauses.append("endpoint LIKE ?")
+        params.append(f"%{endpoint}%")
+    if status_min is not None:
+        clauses.append("response_status >= ?")
+        params.append(status_min)
+    if status_max is not None:
+        clauses.append("response_status <= ?")
+        params.append(status_max)
+    if source:
+        clauses.append("source = ?")
+        params.append(source)
+    if since:
+        clauses.append("created_at >= ?")
+        params.append(since)
+    if until:
+        clauses.append("created_at <= ?")
+        params.append(until)
+    where = " AND ".join(clauses)
+    params.append(limit)
+    sql = f"SELECT * FROM request_history WHERE {where} ORDER BY id DESC LIMIT ?"
+    logger.debug("[HISTORY] query=%s params=%s", sql[:120], params)
+    rows = db.execute(sql, params).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -683,6 +794,164 @@ def db_clear_state(proxy_id: str) -> bool:
     except Exception as exc:
         logger.error("[STATE] db_clear_state error proxy='%s': %s", proxy_id, exc)
         raise
+
+
+# ---------------------------------------------------------------------------
+# DB helper functions — State Snapshots
+# ---------------------------------------------------------------------------
+
+
+def db_save_snapshot(proxy_id: str, name: str) -> dict:
+    """Save current proxy state as a named snapshot. Enforces per-proxy cap."""
+    db = _get_db()
+    state = db_get_state(proxy_id)
+    db.execute(
+        "INSERT INTO state_snapshots (proxy_id, name, data) VALUES (?, ?, ?)",
+        (proxy_id, name, json.dumps(state)),
+    )
+    # Enforce cap — delete oldest beyond limit
+    db.execute(
+        "DELETE FROM state_snapshots WHERE proxy_id = ? AND id NOT IN "
+        "(SELECT id FROM state_snapshots WHERE proxy_id = ? ORDER BY id DESC LIMIT ?)",
+        (proxy_id, proxy_id, MAX_SNAPSHOTS_PER_PROXY),
+    )
+    db.commit()
+    snap_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+    logger.info("[SNAPSHOT] Saved proxy='%s' name='%s' id=%d", proxy_id, name, snap_id)
+    return {"id": snap_id, "proxy_id": proxy_id, "name": name}
+
+
+def db_list_snapshots(proxy_id: str) -> list[dict]:
+    """List all snapshots for a proxy, newest first."""
+    db = _get_db()
+    rows = db.execute(
+        "SELECT id, proxy_id, name, created_at FROM state_snapshots "
+        "WHERE proxy_id = ? ORDER BY id DESC",
+        (proxy_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def db_restore_snapshot(snapshot_id: int) -> dict | None:
+    """Restore proxy state from a snapshot. Returns the restored state or None."""
+    db = _get_db()
+    row = db.execute(
+        "SELECT proxy_id, name, data FROM state_snapshots WHERE id = ?",
+        (snapshot_id,),
+    ).fetchone()
+    if not row:
+        return None
+    proxy_id = row["proxy_id"]
+    data = json.loads(row["data"])
+    db_set_state(proxy_id, data)
+    logger.info("[SNAPSHOT] Restored proxy='%s' snapshot_id=%d name='%s'",
+                proxy_id, snapshot_id, row["name"])
+    return {"proxy_id": proxy_id, "name": row["name"], "state": data}
+
+
+def db_delete_snapshot(snapshot_id: int) -> bool:
+    """Delete a snapshot. Returns True if found and deleted."""
+    db = _get_db()
+    cur = db.execute("DELETE FROM state_snapshots WHERE id = ?", (snapshot_id,))
+    db.commit()
+    deleted = cur.rowcount > 0
+    if deleted:
+        logger.info("[SNAPSHOT] Deleted snapshot_id=%d", snapshot_id)
+    return deleted
+
+
+# ---------------------------------------------------------------------------
+# DB helper functions — Mock Templates
+# ---------------------------------------------------------------------------
+
+
+def db_list_templates(category: str | None = None) -> list[dict]:
+    """List all mock templates, optionally filtered by category."""
+    db = _get_db()
+    if category:
+        rows = db.execute(
+            "SELECT id, name, description, category, created_at FROM mock_templates "
+            "WHERE category = ? ORDER BY name",
+            (category,),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            "SELECT id, name, description, category, created_at FROM mock_templates "
+            "ORDER BY category, name"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def db_get_template(template_id: int) -> dict | None:
+    """Get a full template by ID."""
+    db = _get_db()
+    row = db.execute(
+        "SELECT * FROM mock_templates WHERE id = ?", (template_id,)
+    ).fetchone()
+    if not row:
+        return None
+    result = dict(row)
+    result["template"] = json.loads(result["template"])
+    return result
+
+
+def db_upsert_template(name: str, template: dict, description: str = "",
+                       category: str = "general") -> int:
+    """Create or update a mock template. Returns template ID."""
+    db = _get_db()
+    db.execute(
+        "INSERT INTO mock_templates (name, template, description, category) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(name) DO UPDATE SET template=excluded.template, "
+        "description=excluded.description, category=excluded.category",
+        (name, json.dumps(template), description, category),
+    )
+    db.commit()
+    row = db.execute("SELECT id FROM mock_templates WHERE name = ?", (name,)).fetchone()
+    logger.info("[TEMPLATE] Upserted name='%s' category='%s'", name, category)
+    return row["id"]
+
+
+def db_delete_template(template_id: int) -> bool:
+    """Delete a template. Returns True if found."""
+    db = _get_db()
+    cur = db.execute("DELETE FROM mock_templates WHERE id = ?", (template_id,))
+    db.commit()
+    return cur.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# Mock Response Cache (in-memory LRU)
+# ---------------------------------------------------------------------------
+
+_mock_cache: dict[str, tuple[float, object]] = {}
+_mock_cache_lock = threading.Lock()
+_MOCK_CACHE_MAX = int(os.environ.get("PED_MOCK_CACHE_MAX", "200"))
+
+
+def _mock_cache_key(proxy_id: str, endpoint: str, method: str, params: str) -> str:
+    return f"{proxy_id}:{method}:{endpoint}:{params}"
+
+
+def _mock_cache_get(key: str, ttl: float) -> object | None:
+    """Get a cached mock response if not expired."""
+    with _mock_cache_lock:
+        entry = _mock_cache.get(key)
+        if entry and (time.time() - entry[0]) < ttl:
+            logger.debug("[CACHE] Hit key=%s", key[:80])
+            return entry[1]
+        if entry:
+            del _mock_cache[key]
+    return None
+
+
+def _mock_cache_set(key: str, value: object) -> None:
+    """Store a mock response in cache with LRU eviction."""
+    with _mock_cache_lock:
+        if len(_mock_cache) >= _MOCK_CACHE_MAX:
+            oldest = min(_mock_cache, key=lambda k: _mock_cache[k][0])
+            del _mock_cache[oldest]
+        _mock_cache[key] = (time.time(), value)
+        logger.debug("[CACHE] Set key=%s entries=%d", key[:80], len(_mock_cache))
 
 
 def _get_state_for_resolver(proxy_id: str | None) -> dict:
@@ -1433,6 +1702,16 @@ def _snippet_context(header, json_data, params, url, proxy_id):
     def _fn_state_all():
         return _state
 
+    def _fn_envget(var_name, default=None):
+        """Return env var value if it matches the allowed prefix, else default."""
+        if not isinstance(var_name, str):
+            return default
+        if not var_name.startswith(MOCK_ENV_PREFIX):
+            logger.warning("[ENVGET] Blocked access to env var '%s' (prefix '%s' required)",
+                           var_name, MOCK_ENV_PREFIX)
+            return default
+        return os.environ.get(var_name, default)
+
     return {
         "names": {
             "body": _body,
@@ -1470,6 +1749,8 @@ def _snippet_context(header, json_data, params, url, proxy_id):
             # Whole-payload accessors
             "body": _fn_body,
             "state_all": _fn_state_all,
+            # Environment variable accessor
+            "envget": _fn_envget,
             # Time + identity
             "now": _fn_now,
             "now_epoch": _fn_now_epoch,
@@ -1550,6 +1831,14 @@ def _resolve_value(value: str, header: dict, json_data: dict, params: dict,
         path = parts[2] if len(parts) > 2 else None
         default = parts[3] if len(parts) > 3 else None
         return mongo_get_any(col, key, path, default)
+
+    # --- Environment variable resolver (restricted prefix) ---
+    if value.startswith("envget(") and value.endswith(")"):
+        field, default = _parse_resolver_args(value[7:-1], value)
+        if not field.startswith(MOCK_ENV_PREFIX):
+            logger.warning("[RESOLVER] envget blocked: '%s' (prefix '%s' required)", field, MOCK_ENV_PREFIX)
+            return default
+        return os.environ.get(field, default)
 
     # --- Generators (random) ---
     if value.startswith("alnum(") and value.endswith(")"):
@@ -2367,6 +2656,465 @@ def prettify():
     return jsonify({"prettified": output})
 
 
+@app.route("/ped/minify", methods=["POST"])
+@log_access
+def minify():
+    """Minify JSON — strip all whitespace and produce compact output."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Request body must be JSON"}), 400
+    raw = data.get("data", "")
+    if not raw:
+        return jsonify({"error": "data field is required"}), 400
+
+    # If the input is already a parsed object (caller sent JSON directly)
+    if isinstance(raw, (dict, list)):
+        minified = json.dumps(raw, separators=(",", ":"))
+        logger.info("[MINIFY] Direct object minified len=%d", len(minified))
+        return jsonify({"minified": minified, "original_length": len(json.dumps(raw)),
+                        "minified_length": len(minified)})
+
+    # String input — try to parse, then minify
+    raw = str(raw).strip()
+    try:
+        parsed = json.loads(raw)
+        minified = json.dumps(parsed, separators=(",", ":"))
+        logger.info("[MINIFY] String minified len=%d -> %d", len(raw), len(minified))
+        return jsonify({"minified": minified, "original_length": len(raw),
+                        "minified_length": len(minified)})
+    except json.JSONDecodeError as exc:
+        logger.warning("[MINIFY] Invalid JSON: %s", exc)
+        return jsonify({"error": f"Invalid JSON: {exc}"}), 400
+
+
+@app.route("/ped/jsonpath", methods=["POST"])
+@log_access
+def jsonpath_query():
+    """Extract a value from a JSON document using a dot-separated path.
+
+    Supports:
+      - Dotted paths: ``user.address.city``
+      - Array indices: ``items.0.name``
+      - Multiple paths: pass ``paths`` as a list to query several at once
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    document = data.get("data")
+    if document is None:
+        return jsonify({"error": "data field is required"}), 400
+
+    # If input is a string, try to parse it
+    if isinstance(document, str):
+        try:
+            document = json.loads(document)
+        except json.JSONDecodeError as exc:
+            return jsonify({"error": f"data is not valid JSON: {exc}"}), 400
+
+    # Single path query
+    single_path = data.get("path")
+    # Multi-path query
+    paths = data.get("paths")
+
+    if single_path:
+        resolved, found = _resolve_item_path(document, single_path)
+        logger.info("[JSONPATH] path=%r found=%s", single_path, found)
+        return jsonify({
+            "path": single_path,
+            "found": found,
+            "value": resolved,
+            "type": type(resolved).__name__ if found else None,
+        })
+
+    if paths and isinstance(paths, list):
+        results = {}
+        for p in paths:
+            if not isinstance(p, str):
+                continue
+            resolved, found = _resolve_item_path(document, p)
+            results[p] = {"found": found, "value": resolved,
+                          "type": type(resolved).__name__ if found else None}
+        logger.info("[JSONPATH] multi-path count=%d", len(results))
+        return jsonify({"results": results})
+
+    return jsonify({"error": "path or paths field is required"}), 400
+
+
+@app.route("/ped/diff", methods=["POST"])
+@log_access
+def json_diff():
+    """Compare two JSON documents and return a structured diff.
+
+    Input: ``{"a": {...}, "b": {...}}``
+    Output: list of changes with path, type (added/removed/changed), old/new values.
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    a = data.get("a")
+    b = data.get("b")
+    if a is None or b is None:
+        return jsonify({"error": "Both a and b fields are required"}), 400
+
+    # Parse if strings
+    if isinstance(a, str):
+        try:
+            a = json.loads(a)
+        except json.JSONDecodeError as exc:
+            return jsonify({"error": f"a is not valid JSON: {exc}"}), 400
+    if isinstance(b, str):
+        try:
+            b = json.loads(b)
+        except json.JSONDecodeError as exc:
+            return jsonify({"error": f"b is not valid JSON: {exc}"}), 400
+
+    diffs = _json_diff_recursive(a, b, "")
+    logger.info("[DIFF] changes=%d", len(diffs))
+    return jsonify({
+        "identical": len(diffs) == 0,
+        "change_count": len(diffs),
+        "changes": diffs,
+    })
+
+
+def _json_diff_recursive(a, b, path: str) -> list[dict]:
+    """Recursively diff two JSON-compatible values. Returns a list of change dicts."""
+    diffs = []
+    if a == b:
+        return diffs
+
+    # Type mismatch or non-dict/list → atomic change
+    if (type(a) != type(b)
+            or a is None or b is None
+            or not isinstance(a, (dict, list))):
+        diffs.append({
+            "path": path or "(root)",
+            "type": "changed",
+            "old": a,
+            "new": b,
+        })
+        return diffs
+
+    if isinstance(a, list):
+        max_len = max(len(a), len(b))
+        for i in range(max_len):
+            p = f"{path}[{i}]" if path else f"[{i}]"
+            if i >= len(a):
+                diffs.append({"path": p, "type": "added", "new": b[i]})
+            elif i >= len(b):
+                diffs.append({"path": p, "type": "removed", "old": a[i]})
+            else:
+                diffs.extend(_json_diff_recursive(a[i], b[i], p))
+        return diffs
+
+    # Both are dicts
+    all_keys = sorted(set(list(a.keys()) + list(b.keys())))
+    for key in all_keys:
+        p = f"{path}.{key}" if path else key
+        if key not in a:
+            diffs.append({"path": p, "type": "added", "new": b[key]})
+        elif key not in b:
+            diffs.append({"path": p, "type": "removed", "old": a[key]})
+        else:
+            diffs.extend(_json_diff_recursive(a[key], b[key], p))
+    return diffs
+
+
+@app.route("/ped/validate-schema", methods=["POST"])
+@log_access
+def validate_json_schema():
+    """Validate a JSON document against a JSON Schema (draft-compatible subset).
+
+    Input: ``{"data": {...}, "schema": {...}}``
+
+    This implements a lightweight schema validator without external dependencies.
+    Supports: type, required, properties, items, enum, minimum, maximum,
+    minLength, maxLength, pattern, minItems, maxItems.
+    """
+    req = request.get_json(silent=True)
+    if not req:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    document = req.get("data")
+    schema = req.get("schema")
+    if document is None:
+        return jsonify({"error": "data field is required"}), 400
+    if not schema or not isinstance(schema, dict):
+        return jsonify({"error": "schema field must be a JSON object"}), 400
+
+    if isinstance(document, str):
+        try:
+            document = json.loads(document)
+        except json.JSONDecodeError as exc:
+            return jsonify({"error": f"data is not valid JSON: {exc}"}), 400
+
+    errors = _validate_schema(document, schema, "")
+    valid = len(errors) == 0
+    logger.info("[SCHEMA] valid=%s errors=%d", valid, len(errors))
+    return jsonify({"valid": valid, "errors": errors})
+
+
+def _validate_schema(value, schema: dict, path: str) -> list[dict]:
+    """Lightweight JSON Schema validator. No external deps."""
+    errors = []
+    loc = path or "(root)"
+
+    # --- type ---
+    expected_type = schema.get("type")
+    if expected_type:
+        _TYPE_MAP = {
+            "string": str, "number": (int, float), "integer": int,
+            "boolean": bool, "array": list, "object": dict, "null": type(None),
+        }
+        if isinstance(expected_type, str):
+            py_type = _TYPE_MAP.get(expected_type)
+            if py_type and not isinstance(value, py_type):
+                # JSON has no int/float distinction — accept both for "number"
+                if not (expected_type == "number" and isinstance(value, (int, float))):
+                    errors.append({"path": loc, "message": f"Expected type {expected_type}, got {type(value).__name__}"})
+                    return errors  # skip further checks if type is wrong
+        elif isinstance(expected_type, list):
+            matched = False
+            for et in expected_type:
+                py_type = _TYPE_MAP.get(et)
+                if py_type and isinstance(value, py_type):
+                    matched = True
+                    break
+            if not matched:
+                errors.append({"path": loc, "message": f"Expected one of types {expected_type}, got {type(value).__name__}"})
+                return errors
+
+    # --- enum ---
+    enum_values = schema.get("enum")
+    if enum_values is not None and isinstance(enum_values, list):
+        if value not in enum_values:
+            errors.append({"path": loc, "message": f"Value not in enum: {enum_values}"})
+
+    # --- string constraints ---
+    if isinstance(value, str):
+        min_len = schema.get("minLength")
+        if min_len is not None and len(value) < int(min_len):
+            errors.append({"path": loc, "message": f"String too short: {len(value)} < {min_len}"})
+        max_len = schema.get("maxLength")
+        if max_len is not None and len(value) > int(max_len):
+            errors.append({"path": loc, "message": f"String too long: {len(value)} > {max_len}"})
+        pattern = schema.get("pattern")
+        if pattern:
+            try:
+                if not re.search(pattern, value):
+                    errors.append({"path": loc, "message": f"String does not match pattern: {pattern}"})
+            except re.error:
+                errors.append({"path": loc, "message": f"Invalid regex pattern: {pattern}"})
+
+    # --- number constraints ---
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        minimum = schema.get("minimum")
+        if minimum is not None and value < minimum:
+            errors.append({"path": loc, "message": f"Value {value} < minimum {minimum}"})
+        maximum = schema.get("maximum")
+        if maximum is not None and value > maximum:
+            errors.append({"path": loc, "message": f"Value {value} > maximum {maximum}"})
+
+    # --- object constraints ---
+    if isinstance(value, dict):
+        # required
+        required = schema.get("required", [])
+        for field in required:
+            if field not in value:
+                errors.append({"path": f"{loc}.{field}" if loc != "(root)" else field,
+                               "message": f"Required field missing: {field}"})
+        # properties
+        properties = schema.get("properties", {})
+        for prop_name, prop_schema in properties.items():
+            if prop_name in value:
+                child_path = f"{loc}.{prop_name}" if loc != "(root)" else prop_name
+                errors.extend(_validate_schema(value[prop_name], prop_schema, child_path))
+
+    # --- array constraints ---
+    if isinstance(value, list):
+        min_items = schema.get("minItems")
+        if min_items is not None and len(value) < int(min_items):
+            errors.append({"path": loc, "message": f"Array too short: {len(value)} < {min_items}"})
+        max_items = schema.get("maxItems")
+        if max_items is not None and len(value) > int(max_items):
+            errors.append({"path": loc, "message": f"Array too long: {len(value)} > {max_items}"})
+        items_schema = schema.get("items")
+        if items_schema and isinstance(items_schema, dict):
+            for i, item in enumerate(value):
+                errors.extend(_validate_schema(item, items_schema, f"{loc}[{i}]"))
+
+    return errors
+
+
+@app.route("/ped/transform", methods=["POST"])
+@log_access
+def json_transform():
+    """Apply a sequence of transform operations to a JSON document.
+
+    Input: ``{"data": {...}, "operations": [...]}``
+
+    Supported operations:
+      - ``{"op": "pick", "fields": ["a", "b"]}`` — keep only listed keys
+      - ``{"op": "omit", "fields": ["x", "y"]}`` — remove listed keys
+      - ``{"op": "rename", "from": "old", "to": "new"}`` — rename a key
+      - ``{"op": "set", "path": "a.b", "value": ...}`` — set a value at path
+      - ``{"op": "delete", "path": "a.b"}`` — delete a value at path
+      - ``{"op": "flatten", "separator": "."}`` — flatten nested object
+      - ``{"op": "unflatten", "separator": "."}`` — unflatten dotted keys
+      - ``{"op": "wrap", "key": "data"}`` — wrap in ``{"data": <original>}``
+      - ``{"op": "unwrap", "key": "data"}`` — extract value at key
+      - ``{"op": "sort_keys"}`` — recursively sort object keys
+      - ``{"op": "defaults", "values": {...}}`` — set missing keys only
+      - ``{"op": "map", "path": "items", "set": {"processed": true}}`` — set fields on each array element
+    """
+    req_data = request.get_json(silent=True)
+    if not req_data:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    document = req_data.get("data")
+    operations = req_data.get("operations", [])
+    if document is None:
+        return jsonify({"error": "data field is required"}), 400
+    if not isinstance(operations, list) or not operations:
+        return jsonify({"error": "operations must be a non-empty list"}), 400
+
+    if isinstance(document, str):
+        try:
+            document = json.loads(document)
+        except json.JSONDecodeError as exc:
+            return jsonify({"error": f"data is not valid JSON: {exc}"}), 400
+
+    result = copy.deepcopy(document)
+    applied = []
+    errors = []
+
+    for i, op in enumerate(operations):
+        if not isinstance(op, dict):
+            errors.append({"index": i, "error": "Operation must be an object"})
+            continue
+        op_type = op.get("op", "")
+        try:
+            result = _apply_transform(result, op)
+            applied.append({"index": i, "op": op_type})
+        except Exception as exc:
+            errors.append({"index": i, "op": op_type, "error": str(exc)})
+
+    logger.info("[TRANSFORM] applied=%d errors=%d", len(applied), len(errors))
+    return jsonify({
+        "result": result,
+        "applied": len(applied),
+        "errors": errors,
+    })
+
+
+def _apply_transform(data, op: dict):
+    """Apply a single transform operation. Returns transformed data."""
+    op_type = op.get("op", "")
+
+    if op_type == "pick" and isinstance(data, dict):
+        fields = op.get("fields", [])
+        return {k: v for k, v in data.items() if k in fields}
+
+    if op_type == "omit" and isinstance(data, dict):
+        fields = op.get("fields", [])
+        return {k: v for k, v in data.items() if k not in fields}
+
+    if op_type == "rename" and isinstance(data, dict):
+        old_key = op.get("from", "")
+        new_key = op.get("to", "")
+        if old_key in data:
+            data[new_key] = data.pop(old_key)
+        return data
+
+    if op_type == "set":
+        path = op.get("path", "")
+        value = op.get("value")
+        if isinstance(data, dict) and path:
+            _set_item_path(data, path, value)
+        return data
+
+    if op_type == "delete":
+        path = op.get("path", "")
+        if isinstance(data, dict) and path:
+            _delete_item_path(data, path)
+        return data
+
+    if op_type == "flatten" and isinstance(data, dict):
+        sep = op.get("separator", ".")
+        return _flatten_dict(data, sep)
+
+    if op_type == "unflatten" and isinstance(data, dict):
+        sep = op.get("separator", ".")
+        return _unflatten_dict(data, sep)
+
+    if op_type == "wrap":
+        key = op.get("key", "data")
+        return {key: data}
+
+    if op_type == "unwrap" and isinstance(data, dict):
+        key = op.get("key", "data")
+        return data.get(key, data)
+
+    if op_type == "sort_keys":
+        return _sort_keys_recursive(data)
+
+    if op_type == "defaults" and isinstance(data, dict):
+        defaults = op.get("values", {})
+        for k, v in defaults.items():
+            if k not in data:
+                data[k] = v
+        return data
+
+    if op_type == "map" and isinstance(data, dict):
+        path = op.get("path", "")
+        set_fields = op.get("set", {})
+        resolved, found = _resolve_item_path(data, path)
+        if found and isinstance(resolved, list):
+            for item in resolved:
+                if isinstance(item, dict):
+                    item.update(set_fields)
+        return data
+
+    raise ValueError(f"Unknown or incompatible operation: {op_type}")
+
+
+def _flatten_dict(d: dict, sep: str = ".", prefix: str = "") -> dict:
+    """Flatten a nested dict into dotted keys."""
+    out = {}
+    for k, v in d.items():
+        full_key = f"{prefix}{sep}{k}" if prefix else k
+        if isinstance(v, dict):
+            out.update(_flatten_dict(v, sep, full_key))
+        else:
+            out[full_key] = v
+    return out
+
+
+def _unflatten_dict(d: dict, sep: str = ".") -> dict:
+    """Unflatten dotted keys back into nested dicts."""
+    out: dict = {}
+    for key, value in d.items():
+        parts = key.split(sep)
+        cur = out
+        for part in parts[:-1]:
+            if part not in cur or not isinstance(cur[part], dict):
+                cur[part] = {}
+            cur = cur[part]
+        cur[parts[-1]] = value
+    return out
+
+
+def _sort_keys_recursive(data):
+    """Recursively sort dict keys."""
+    if isinstance(data, dict):
+        return {k: _sort_keys_recursive(v) for k, v in sorted(data.items())}
+    if isinstance(data, list):
+        return [_sort_keys_recursive(item) for item in data]
+    return data
+
+
 # ---------------------------------------------------------------------------
 # Routes — Proxy CRUD
 # ---------------------------------------------------------------------------
@@ -2832,9 +3580,22 @@ def import_proxies():
 @log_access
 @require_auth
 def get_history(identifier):
-    """Get recent request history for a proxy."""
+    """Get recent request history for a proxy with optional filters."""
     limit = request.args.get("limit", 50, type=int)
-    history = db_get_request_history(identifier, limit)
+    method_filter = request.args.get("method")
+    endpoint_filter = request.args.get("endpoint")
+    status_min = request.args.get("status_min", type=int)
+    status_max = request.args.get("status_max", type=int)
+    source_filter = request.args.get("source")
+    since = request.args.get("since")
+    until = request.args.get("until")
+
+    history = db_get_request_history(
+        identifier, limit,
+        method=method_filter, endpoint=endpoint_filter,
+        status_min=status_min, status_max=status_max,
+        source=source_filter, since=since, until=until,
+    )
     # Parse JSON strings back to objects for readability
     for h in history:
         for field in ("request_headers", "request_body", "response_body"):
@@ -2985,8 +3746,642 @@ def remove_proxy_user(identifier: str, username: str):
 
 
 # ---------------------------------------------------------------------------
+# Routes — Mock Validation & Dry-Run (Feature 3)
+# ---------------------------------------------------------------------------
+
+
+@app.route("/proxy/mock/validate/", methods=["POST"])
+@log_access
+def validate_mock():
+    """Validate a mock payload and optionally dry-run against a test request."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    mock_payload = data.get("mock")
+    if mock_payload is None:
+        return jsonify({"error": "mock field is required"}), 400
+
+    test_request = data.get("test_request", {})
+    proxy_id = data.get("proxy_identifier", "__validate__")
+
+    errors = []
+    resolved_output = None
+    store_ops_preview = []
+
+    try:
+        mock_copy = copy.deepcopy(mock_payload)
+
+        t_headers = test_request.get("headers", {})
+        t_body = test_request.get("body", {})
+        t_params = test_request.get("params", {})
+        t_method = test_request.get("method", "GET")
+        t_url = test_request.get("url", "/test")
+
+        if isinstance(mock_copy, list):
+            if not mock_copy:
+                errors.append("Sequence mock is empty (no steps)")
+            else:
+                mock_copy = mock_copy[0]
+
+        if isinstance(mock_copy, dict) and "conditions" in mock_copy and "responses" in mock_copy:
+            responses = mock_copy.get("responses", [])
+            if not responses:
+                errors.append("Conditional mock has no responses")
+            selected = None
+            for case in responses:
+                case_conditions = case.get("when", [])
+                try:
+                    if _check_conditions(case_conditions, t_headers, t_body, t_params,
+                                         path=t_url, method=t_method, proxy_id=proxy_id):
+                        selected = case.get("then", {})
+                        break
+                except Exception as exc:
+                    errors.append(f"Condition check error: {exc}")
+            if selected is None:
+                selected = mock_copy.get("default", {})
+            mock_copy = selected
+
+        if isinstance(mock_copy, dict):
+            store_raw = mock_copy.pop("_store", None)
+            if store_raw:
+                store_ops_preview = [store_raw] if isinstance(store_raw, dict) else store_raw
+            mock_copy.pop("_delay_ms", None)
+            mock_copy.pop("_delay_profile", None)
+            mock_copy.pop("_callback", None)
+            mock_copy.pop("_cache_ttl", None)
+
+        if isinstance(mock_copy, dict) and "status_code" in mock_copy and "body" in mock_copy:
+            resolved_output = resolve_mock_data(
+                copy.deepcopy(mock_copy["body"]), header=t_headers, json_body=t_body,
+                params=t_params, url=t_url, proxy_id=proxy_id,
+            )
+        else:
+            resolved_output = resolve_mock_data(
+                copy.deepcopy(mock_copy), header=t_headers, json_body=t_body,
+                params=t_params, url=t_url, proxy_id=proxy_id,
+            )
+
+    except Exception as exc:
+        errors.append(f"Resolution error: {exc}")
+        logger.warning("[VALIDATE] Mock validation failed: %s", exc)
+
+    valid = len(errors) == 0
+    logger.info("[VALIDATE] valid=%s errors=%d", valid, len(errors))
+    result = {"valid": valid, "errors": errors}
+    if resolved_output is not None:
+        result["resolved_output"] = resolved_output
+    if store_ops_preview:
+        result["store_ops_preview"] = store_ops_preview
+    return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
+# Routes — Batch Mock Operations (Feature 7)
+# ---------------------------------------------------------------------------
+
+
+@app.route("/proxy/mock/batch/", methods=["POST"])
+@log_access
+def batch_mock_ops():
+    """Execute multiple mock operations in a single request."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    proxy_id = data.get("proxy_identifier")
+    operations = data.get("operations", [])
+    if not proxy_id:
+        return jsonify({"error": "proxy_identifier is required"}), 400
+    if not operations or not isinstance(operations, list):
+        return jsonify({"error": "operations must be a non-empty list"}), 400
+
+    results = []
+    errors = []
+    logger.info("[BATCH] Starting %d operations for proxy='%s'", len(operations), proxy_id)
+
+    for i, op in enumerate(operations):
+        action = op.get("action", "create")
+        ep = op.get("end_point") or op.get("endpoint")
+        mth = op.get("method", "*")
+        mock_data = op.get("mock")
+
+        if not ep:
+            errors.append({"index": i, "error": "end_point required"})
+            continue
+        try:
+            if action in ("create", "update"):
+                if mock_data is None:
+                    errors.append({"index": i, "error": "mock required for create/update"})
+                    continue
+                if isinstance(mock_data, str):
+                    mock_data = json.loads(mock_data)
+                old = db_upsert_mock(proxy_id, ep, mth, mock_data)
+                results.append({"index": i, "action": action, "end_point": ep,
+                                "method": mth, "replaced": old is not None})
+            elif action == "delete":
+                deleted = db_delete_mock(proxy_id, ep, mth)
+                results.append({"index": i, "action": "delete", "end_point": ep,
+                                "method": mth, "found": deleted is not None})
+            else:
+                errors.append({"index": i, "error": f"Unknown action: {action}"})
+        except Exception as exc:
+            errors.append({"index": i, "error": str(exc)})
+
+    logger.info("[BATCH] Done proxy='%s' ok=%d errors=%d", proxy_id, len(results), len(errors))
+    return jsonify({
+        "proxy_identifier": proxy_id,
+        "results": results,
+        "errors": errors,
+        "total_processed": len(results),
+        "total_errors": len(errors),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Routes — State Snapshots (Feature 6)
+# ---------------------------------------------------------------------------
+
+
+@app.route("/proxy/state/<identifier>/snapshot/", methods=["POST"])
+@log_access
+def save_snapshot_route(identifier):
+    """Save current proxy state as a named snapshot."""
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "").strip()
+    if not name:
+        name = f"snapshot_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    result = db_save_snapshot(identifier, name)
+    return jsonify(result)
+
+
+@app.route("/proxy/state/<identifier>/snapshots/", methods=["GET"])
+@log_access
+def list_snapshots_route(identifier):
+    """List all snapshots for a proxy."""
+    snapshots = db_list_snapshots(identifier)
+    return jsonify({"proxy_id": identifier, "snapshots": snapshots})
+
+
+@app.route("/proxy/state/restore/<int:snapshot_id>/", methods=["POST"])
+@log_access
+def restore_snapshot_route(snapshot_id):
+    """Restore proxy state from a snapshot."""
+    result = db_restore_snapshot(snapshot_id)
+    if result is None:
+        return jsonify({"error": "Snapshot not found"}), 404
+    return jsonify({"message": "State restored", **result})
+
+
+@app.route("/proxy/state/snapshot/<int:snapshot_id>/", methods=["DELETE"])
+@log_access
+def delete_snapshot_route(snapshot_id):
+    """Delete a state snapshot."""
+    deleted = db_delete_snapshot(snapshot_id)
+    if not deleted:
+        return jsonify({"error": "Snapshot not found"}), 404
+    return jsonify({"message": "Snapshot deleted", "id": snapshot_id})
+
+
+# ---------------------------------------------------------------------------
+# Routes — Mock Templates (Feature 13)
+# ---------------------------------------------------------------------------
+
+
+@app.route("/proxy/templates/", methods=["GET"])
+@log_access
+def list_templates_route():
+    """List all mock templates."""
+    category = request.args.get("category")
+    templates = db_list_templates(category)
+    return jsonify({"templates": templates})
+
+
+@app.route("/proxy/templates/<int:template_id>/", methods=["GET"])
+@log_access
+def get_template_route(template_id):
+    """Get a full mock template by ID."""
+    tmpl = db_get_template(template_id)
+    if not tmpl:
+        return jsonify({"error": "Template not found"}), 404
+    return jsonify(tmpl)
+
+
+@app.route("/proxy/templates/", methods=["POST"])
+@log_access
+@require_auth
+def create_template_route():
+    """Create or update a mock template."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Request body must be JSON"}), 400
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    template = data.get("template")
+    if template is None:
+        return jsonify({"error": "template is required"}), 400
+    tid = db_upsert_template(
+        name, template,
+        data.get("description", ""),
+        data.get("category", "general"),
+    )
+    return jsonify({"id": tid, "name": name, "message": "Template saved"})
+
+
+@app.route("/proxy/templates/<int:template_id>/", methods=["DELETE"])
+@log_access
+@require_auth
+def delete_template_route(template_id):
+    """Delete a mock template."""
+    if not db_delete_template(template_id):
+        return jsonify({"error": "Template not found"}), 404
+    return jsonify({"message": "Template deleted", "id": template_id})
+
+
+# ---------------------------------------------------------------------------
+# Routes — Mock Tagging (Feature 12)
+# ---------------------------------------------------------------------------
+
+
+@app.route("/proxy/mock/tags/", methods=["POST"])
+@log_access
+def update_mock_tags():
+    """Update tags for a specific mock."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Request body must be JSON"}), 400
+    proxy_id = data.get("proxy_identifier")
+    endpoint = data.get("end_point")
+    method = data.get("method")
+    tags = data.get("tags", "")
+    if not proxy_id or not endpoint or not method:
+        return jsonify({"error": "proxy_identifier, end_point, and method are required"}), 400
+    if isinstance(tags, list):
+        tags = ",".join(str(t).strip() for t in tags)
+    db = _get_db()
+    cur = db.execute(
+        "UPDATE mocks SET tags = ? WHERE proxy_id = ? AND endpoint = ? AND method = ?",
+        (tags, proxy_id, endpoint, method),
+    )
+    db.commit()
+    if cur.rowcount == 0:
+        return jsonify({"error": "Mock not found"}), 404
+    logger.info("[TAGS] Updated proxy='%s' ep='%s' method='%s' tags='%s'",
+                proxy_id, endpoint, method, tags)
+    return jsonify({"proxy_identifier": proxy_id, "end_point": endpoint,
+                    "method": method, "tags": tags})
+
+
+@app.route("/proxy/mocks/<identifier>/", methods=["GET"])
+@log_access
+def list_mocks_with_tags(identifier):
+    """List mocks for a proxy with tag info, optionally filtered by tag."""
+    tag_filter = request.args.get("tag", "").strip()
+    db = _get_db()
+    rows = db.execute(
+        "SELECT endpoint, method, response, tags FROM mocks WHERE proxy_id = ? ORDER BY endpoint",
+        (identifier,),
+    ).fetchall()
+    mocks = []
+    for r in rows:
+        mock_tags = [t.strip() for t in (r["tags"] or "").split(",") if t.strip()]
+        if tag_filter and tag_filter not in mock_tags:
+            continue
+        mocks.append({
+            "endpoint": r["endpoint"],
+            "method": r["method"],
+            "tags": mock_tags,
+            "response_preview": r["response"][:200],
+        })
+    return jsonify({"proxy_id": identifier, "mocks": mocks, "count": len(mocks)})
+
+
+# ---------------------------------------------------------------------------
+# Routes — Mock Analytics (Feature 14)
+# ---------------------------------------------------------------------------
+
+
+@app.route("/proxy/analytics/<identifier>/", methods=["GET"])
+@log_access
+@require_auth
+def mock_analytics(identifier):
+    """Compute analytics from request history for a proxy."""
+    db = _get_db()
+    total = db.execute(
+        "SELECT COUNT(*) as c FROM request_history WHERE proxy_id = ?", (identifier,)
+    ).fetchone()["c"]
+    source_counts = {}
+    for row in db.execute(
+        "SELECT source, COUNT(*) as c FROM request_history WHERE proxy_id = ? GROUP BY source",
+        (identifier,),
+    ).fetchall():
+        source_counts[row["source"]] = row["c"]
+    method_counts = {}
+    for row in db.execute(
+        "SELECT method, COUNT(*) as c FROM request_history WHERE proxy_id = ? GROUP BY method",
+        (identifier,),
+    ).fetchall():
+        method_counts[row["method"]] = row["c"]
+    avg_lat = db.execute(
+        "SELECT AVG(duration_ms) as avg_ms FROM request_history "
+        "WHERE proxy_id = ? AND duration_ms IS NOT NULL", (identifier,),
+    ).fetchone()["avg_ms"]
+    error_count = db.execute(
+        "SELECT COUNT(*) as c FROM request_history WHERE proxy_id = ? AND response_status >= 400",
+        (identifier,),
+    ).fetchone()["c"]
+    top_endpoints = []
+    for row in db.execute(
+        "SELECT endpoint, method, COUNT(*) as hits FROM request_history "
+        "WHERE proxy_id = ? GROUP BY endpoint, method ORDER BY hits DESC LIMIT 10",
+        (identifier,),
+    ).fetchall():
+        top_endpoints.append(dict(row))
+    # Stale mocks
+    mock_eps = set()
+    for row in db.execute(
+        "SELECT endpoint, method FROM mocks WHERE proxy_id = ?", (identifier,)
+    ).fetchall():
+        mock_eps.add((row["endpoint"], row["method"]))
+    hit_eps = set()
+    for row in db.execute(
+        "SELECT DISTINCT endpoint, method FROM request_history WHERE proxy_id = ? AND source = 'mock'",
+        (identifier,),
+    ).fetchall():
+        hit_eps.add((row["endpoint"], row["method"]))
+    stale = [{"endpoint": e, "method": m} for e, m in mock_eps - hit_eps]
+
+    logger.info("[ANALYTICS] proxy='%s' total=%d", identifier, total)
+    return jsonify({
+        "proxy_id": identifier, "total_requests": total,
+        "by_source": source_counts, "by_method": method_counts,
+        "avg_latency_ms": round(avg_lat, 1) if avg_lat else None,
+        "error_rate": round(error_count / total * 100, 1) if total > 0 else 0,
+        "error_count": error_count,
+        "top_endpoints": top_endpoints, "stale_mocks": stale,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Routes — Proxy Health Dashboard (Feature 17)
+# ---------------------------------------------------------------------------
+
+
+@app.route("/proxy/health/<identifier>/", methods=["GET"])
+@log_access
+def proxy_health(identifier):
+    """Check health of a proxy's upstream domain."""
+    api_domain = db_get_proxy_domain(identifier)
+    if api_domain is None:
+        return jsonify({"error": "Proxy not found"}), 404
+
+    status = "unknown"
+    latency_ms = None
+    error_msg = None
+    try:
+        parsed = urlparse(api_domain if "://" in api_domain else f"https://{api_domain}")
+        health_url = f"{parsed.scheme}://{parsed.netloc}/"
+        start = time.time()
+        resp = http_requests.head(health_url, timeout=5, allow_redirects=True)
+        latency_ms = int((time.time() - start) * 1000)
+        if resp.status_code < 400:
+            status = "healthy"
+        elif resp.status_code < 500:
+            status = "degraded"
+        else:
+            status = "unhealthy"
+    except http_requests.exceptions.Timeout:
+        status = "unhealthy"
+        error_msg = "Connection timed out"
+    except http_requests.exceptions.ConnectionError as exc:
+        status = "unhealthy"
+        error_msg = f"Connection failed: {exc}"
+    except Exception as exc:
+        status = "unhealthy"
+        error_msg = str(exc)
+
+    db = _get_db()
+    mock_count = db.execute(
+        "SELECT COUNT(*) as c FROM mocks WHERE proxy_id = ?", (identifier,)
+    ).fetchone()["c"]
+    history_count = db.execute(
+        "SELECT COUNT(*) as c FROM request_history WHERE proxy_id = ?", (identifier,)
+    ).fetchone()["c"]
+
+    logger.info("[HEALTH] proxy='%s' domain=%s status=%s latency=%s",
+                identifier, api_domain, status, latency_ms)
+    result = {
+        "proxy_id": identifier, "api_domain": api_domain,
+        "upstream_status": status, "upstream_latency_ms": latency_ms,
+        "mock_count": mock_count, "history_count": history_count,
+    }
+    if error_msg:
+        result["error"] = error_msg
+    return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
+# Routes — Storage / Space Optimization
+# ---------------------------------------------------------------------------
+
+
+@app.route("/proxy/storage/", methods=["GET"])
+@log_access
+@require_auth
+def storage_info():
+    """Return database size and storage usage info."""
+    db_size = 0
+    try:
+        db_size = os.path.getsize(DB_PATH)
+    except OSError:
+        pass
+    db = _get_db()
+    history_count = db.execute("SELECT COUNT(*) as c FROM request_history").fetchone()["c"]
+    mock_count = db.execute("SELECT COUNT(*) as c FROM mocks").fetchone()["c"]
+    proxy_count = db.execute("SELECT COUNT(*) as c FROM proxies").fetchone()["c"]
+    snapshot_count = 0
+    try:
+        snapshot_count = db.execute("SELECT COUNT(*) as c FROM state_snapshots").fetchone()["c"]
+    except Exception:
+        pass
+    return jsonify({
+        "db_size_bytes": db_size,
+        "db_size_mb": round(db_size / (1024 * 1024), 2),
+        "history_count": history_count, "mock_count": mock_count,
+        "proxy_count": proxy_count, "snapshot_count": snapshot_count,
+        "history_limit": REQUEST_HISTORY_LIMIT,
+    })
+
+
+@app.route("/proxy/storage/cleanup/", methods=["POST"])
+@log_access
+@require_auth
+def storage_cleanup():
+    """Clean up old history entries and vacuum the database."""
+    data = request.get_json(silent=True) or {}
+    keep_days = data.get("keep_days", 7)
+    vacuum = data.get("vacuum", True)
+
+    db = _get_db()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=keep_days)).strftime("%Y-%m-%d %H:%M:%S")
+    cur = db.execute("DELETE FROM request_history WHERE created_at < ?", (cutoff,))
+    deleted_history = cur.rowcount
+    db.commit()
+
+    deleted_snapshots = 0
+    try:
+        cur2 = db.execute(
+            "DELETE FROM state_snapshots WHERE proxy_id NOT IN (SELECT identifier FROM proxies)"
+        )
+        deleted_snapshots = cur2.rowcount
+        db.commit()
+    except Exception:
+        pass
+
+    size_before = os.path.getsize(DB_PATH)
+    if vacuum:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("VACUUM")
+        conn.close()
+    size_after = os.path.getsize(DB_PATH)
+
+    logger.info("[CLEANUP] deleted_history=%d deleted_snapshots=%d vacuum=%s "
+                "size_before=%d size_after=%d saved=%d",
+                deleted_history, deleted_snapshots, vacuum,
+                size_before, size_after, size_before - size_after)
+    return jsonify({
+        "deleted_history": deleted_history,
+        "deleted_snapshots": deleted_snapshots,
+        "vacuumed": vacuum,
+        "size_before_bytes": size_before,
+        "size_after_bytes": size_after,
+        "saved_bytes": size_before - size_after,
+        "saved_mb": round((size_before - size_after) / (1024 * 1024), 2),
+    })
+
+
+# ---------------------------------------------------------------------------
 # Routes — Proxy Passthrough
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Latency Simulation Profiles (Feature 8)
+# ---------------------------------------------------------------------------
+
+_DELAY_PROFILE_RE = re.compile(r"^(\w+)\(([^)]*)\)$")
+
+
+def _resolve_delay_profile(profile: str) -> int:
+    """Parse a delay profile string and return a delay in ms.
+
+    Supported profiles:
+      uniform(min, max) — uniform random between min and max ms
+      normal(mean, stddev) — normal distribution, clamped to [0, 30000]
+      spike(base, spike, pct) — base ms most of the time, spike ms pct% of the time
+    """
+    m = _DELAY_PROFILE_RE.match(profile.strip())
+    if not m:
+        logger.warning("[DELAY] Invalid delay profile: %r", profile)
+        return 0
+    name = m.group(1).lower()
+    args = [a.strip() for a in m.group(2).split(",") if a.strip()]
+    try:
+        if name == "uniform" and len(args) == 2:
+            lo, hi = int(args[0]), int(args[1])
+            delay = random.randint(min(lo, hi), max(lo, hi))
+            logger.debug("[DELAY] Profile uniform(%d,%d) -> %dms", lo, hi, delay)
+            return delay
+        if name == "normal" and len(args) == 2:
+            mean, stddev = float(args[0]), float(args[1])
+            delay = max(0, int(random.gauss(mean, stddev)))
+            logger.debug("[DELAY] Profile normal(%.0f,%.0f) -> %dms", mean, stddev, delay)
+            return delay
+        if name == "spike" and len(args) == 3:
+            base, spike, pct = int(args[0]), int(args[1]), float(args[2])
+            delay = spike if random.random() * 100 < pct else base
+            logger.debug("[DELAY] Profile spike(%d,%d,%.1f%%) -> %dms", base, spike, pct, delay)
+            return delay
+    except (ValueError, TypeError) as exc:
+        logger.warning("[DELAY] Profile parse error %r: %s", profile, exc)
+    logger.warning("[DELAY] Unknown delay profile: %r", profile)
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Webhook / Callback Simulation (Feature 5)
+# ---------------------------------------------------------------------------
+
+
+def _schedule_callback(callback: dict, headers: dict, json_body: dict,
+                       params: dict, url: str, proxy_id: str) -> None:
+    """Schedule an async HTTP callback from a mock response _callback key.
+
+    Shape: {"url": "...", "method": "POST", "body": {...}, "headers": {...}, "delay_ms": 2000}
+    """
+    cb_url = callback.get("url")
+    if not cb_url or not isinstance(cb_url, str):
+        logger.warning("[CALLBACK] Missing or invalid url in _callback")
+        return
+
+    # Resolve the URL through the resolver pipeline
+    cb_url = str(_resolve_value(cb_url, headers, json_body, params, url, proxy_id))
+
+    # SSRF guard — restrict callback URLs
+    parsed = urlparse(cb_url)
+    if not parsed.scheme or not parsed.hostname:
+        logger.warning("[CALLBACK] Invalid callback URL: %s", cb_url)
+        return
+    if not _is_domain_allowed(parsed.hostname):
+        logger.warning("[CALLBACK] Callback URL domain not allowed: %s", cb_url)
+        return
+
+    cb_method = (callback.get("method") or "POST").upper()
+    cb_delay_ms = min(int(callback.get("delay_ms", 2000)), 30_000)
+    cb_headers = callback.get("headers", {})
+    cb_body = callback.get("body", {})
+
+    # Resolve body through mock data pipeline
+    if isinstance(cb_body, (dict, list)):
+        cb_body = resolve_mock_data(
+            copy.deepcopy(cb_body),
+            header=headers, json_body=json_body, params=params,
+            url=url, proxy_id=proxy_id,
+        )
+    elif isinstance(cb_body, str):
+        cb_body = _resolve_value(cb_body, headers, json_body, params, url, proxy_id)
+
+    # Resolve header values
+    resolved_headers = {}
+    for k, v in cb_headers.items():
+        if isinstance(v, str):
+            resolved_headers[k] = str(_resolve_value(v, headers, json_body, params, url, proxy_id))
+        else:
+            resolved_headers[k] = v
+    if "Content-Type" not in resolved_headers:
+        resolved_headers["Content-Type"] = "application/json"
+
+    def _fire():
+        try:
+            logger.info("[CALLBACK] Firing %s %s (delay=%dms proxy=%s)",
+                        cb_method, cb_url, cb_delay_ms, proxy_id)
+            resp = http_requests.request(
+                cb_method, cb_url,
+                json=cb_body if isinstance(cb_body, (dict, list)) else None,
+                data=str(cb_body) if not isinstance(cb_body, (dict, list)) else None,
+                headers=resolved_headers,
+                timeout=FORWARD_TIMEOUT,
+            )
+            logger.info("[CALLBACK] Response %s %s status=%d", cb_method, cb_url, resp.status_code)
+        except Exception as exc:
+            logger.error("[CALLBACK] Failed %s %s: %s", cb_method, cb_url, exc)
+
+    delay_s = max(0, cb_delay_ms) / 1000.0
+    timer = threading.Timer(delay_s, _fire)
+    timer.daemon = True
+    timer.start()
+    logger.info("[CALLBACK] Scheduled %s %s in %dms", cb_method, cb_url, cb_delay_ms)
 
 
 _SUPPORTED_MOCK_METHODS = {"*", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
@@ -3107,6 +4502,15 @@ def proxy_request(identifier, endpoint):
         logger.info("[PROXY] %s /%s/%s%s", method, identifier, endpoint,
                      '?' + query_string if query_string else '')
 
+        # Per-proxy CORS override via state key
+        try:
+            _proxy_st = db_get_state(identifier)
+            _cors_override = _proxy_st.get("_cors_origins")
+            if _cors_override:
+                g._proxy_cors_origins = _cors_override
+        except Exception:
+            pass
+
         # Capture request info for history
         req_headers = {k: v for k, v in request.headers.items() if k.lower() != 'host'}
         req_body = request.get_data(as_text=True)[:2000] or None
@@ -3129,8 +4533,25 @@ def proxy_request(identifier, endpoint):
                 logger.error("Redirect forward failed: %s", exc)
                 return jsonify({"error": "Redirect forward failed"}), 502
 
-        # --- Mock lookup ---
+        # --- Mock lookup (with inheritance from parent proxy) ---
         mock_requests = db_get_mocks_for_proxy(identifier)
+        # Feature 16: parent proxy inheritance — child overrides parent
+        try:
+            _p_state = db_get_state(identifier)
+            parent_proxy = _p_state.get("_parent_proxy")
+        except Exception:
+            parent_proxy = None
+        if parent_proxy and isinstance(parent_proxy, str):
+            parent_mocks = db_get_mocks_for_proxy(parent_proxy)
+            # Merge: parent first, child overrides
+            merged = {}
+            for ep, methods_d in parent_mocks.items():
+                merged.setdefault(ep, {}).update(methods_d)
+            for ep, methods_d in mock_requests.items():
+                merged.setdefault(ep, {}).update(methods_d)
+            mock_requests = merged
+            logger.debug("[INHERIT] Merged mocks from parent '%s' for '%s'",
+                         parent_proxy, identifier)
         matcher = MockMatcher(mock_requests, endpoint, query_string, api_url)
         _, mock_data = matcher.find(method)
 
@@ -3176,15 +4597,21 @@ def proxy_request(identifier, endpoint):
                     identifier, headers, json_body, params, api_url,
                 )
 
-            # --- Response delay (supports placeholder strings — e.g.
-            #     "_delay_ms": "jsonget(delay_ms)" or "snippet(...)"). ---
+            # --- Response delay (supports placeholder strings, or _delay_profile
+            #     for randomized latency: uniform(min,max), normal(mean,stddev),
+            #     spike(base,spike,pct)) ---
             delay_raw = None
+            delay_profile = None
             if isinstance(mock_data_copy, dict):
                 delay_raw = mock_data_copy.pop("_delay_ms", None)
-            delay_ms = _resolve_to_int(
-                delay_raw, 0, headers, json_body, params, api_url, "DELAY",
-                proxy_id=identifier,
-            )
+                delay_profile = mock_data_copy.pop("_delay_profile", None)
+            if delay_profile and isinstance(delay_profile, str):
+                delay_ms = _resolve_delay_profile(delay_profile)
+            else:
+                delay_ms = _resolve_to_int(
+                    delay_raw, 0, headers, json_body, params, api_url, "DELAY",
+                    proxy_id=identifier,
+                )
             _MAX_DELAY_MS = 30_000
             if delay_ms > _MAX_DELAY_MS:
                 logger.warning("[DELAY] Clamping delay from %dms to %dms", delay_ms, _MAX_DELAY_MS)
@@ -3192,6 +4619,36 @@ def proxy_request(identifier, endpoint):
             if delay_ms > 0:
                 logger.info("[DELAY] Sleeping %dms before responding", delay_ms)
                 time.sleep(delay_ms / 1000.0)
+
+            # --- Webhook / Callback simulation ---
+            if isinstance(mock_data_copy, dict):
+                _callback = mock_data_copy.pop("_callback", None)
+                if _callback and isinstance(_callback, dict):
+                    _schedule_callback(
+                        _callback, headers, json_body, params, api_url, identifier
+                    )
+
+            # --- Mock response caching: pop _cache_ttl for later use ---
+            _cache_ttl_raw = None
+            if isinstance(mock_data_copy, dict):
+                _cache_ttl_raw = mock_data_copy.pop("_cache_ttl", None)
+
+            # Check cache if _cache_ttl is set on the original mock
+            if _cache_ttl_raw is not None:
+                cache_ttl_s = max(0, int(_cache_ttl_raw))
+                if cache_ttl_s > 0:
+                    ckey = _mock_cache_key(identifier, endpoint, method, query_string)
+                    cached = _mock_cache_get(ckey, cache_ttl_s)
+                    if cached is not None:
+                        duration_ms = int((time.time() - start_time) * 1000)
+                        db_log_request(
+                            identifier, endpoint, method, req_headers, req_body,
+                            query_string, 200, json.dumps(cached)[:2000],
+                            "mock", duration_ms,
+                        )
+                        logger.info("[CACHE] Serving cached response for %s %s/%s",
+                                    method, identifier, endpoint)
+                        return jsonify(cached), 200
 
             # --- status_code + body structure ---
             if isinstance(mock_data_copy, dict) and "status_code" in mock_data_copy and "body" in mock_data_copy:
@@ -3212,6 +4669,12 @@ def proxy_request(identifier, endpoint):
                     identifier, endpoint, method, req_headers, req_body, query_string,
                     status_code, json.dumps(processed)[:2000], "mock", duration_ms,
                 )
+                # Store in cache if _cache_ttl is set
+                if _cache_ttl_raw is not None and int(_cache_ttl_raw) > 0:
+                    _mock_cache_set(
+                        _mock_cache_key(identifier, endpoint, method, query_string),
+                        processed,
+                    )
                 response = jsonify(processed), status_code
                 # Apply custom response headers
                 if resp_headers:
@@ -3224,6 +4687,12 @@ def proxy_request(identifier, endpoint):
                 mock_data_copy, header=headers, json_body=json_body, params=params,
                 url=api_url, proxy_id=identifier,
             )
+            # Store in cache if _cache_ttl is set
+            if _cache_ttl_raw is not None and int(_cache_ttl_raw) > 0:
+                _mock_cache_set(
+                    _mock_cache_key(identifier, endpoint, method, query_string),
+                    processed,
+                )
             duration_ms = int((time.time() - start_time) * 1000)
             db_log_request(
                 identifier, endpoint, method, req_headers, req_body, query_string,
@@ -3262,10 +4731,36 @@ def proxy_request(identifier, endpoint):
         if not _is_domain_allowed(api_domain):
             return jsonify({"error": "Target domain not allowed"}), 403
 
-        # --- Forward to real API ---
+        # --- Forward to real API (with optional request/response transforms) ---
         try:
-            api = API(request, api_url)
-            flask_resp, duration_ms, raw_resp = api.forward()
+            fwd_api = API(request, api_url)
+            # Feature 15: Request/Response transforms from state
+            _transforms_state = None
+            try:
+                _transforms_state = db_get_state(identifier)
+                req_transforms = _transforms_state.get("_request_transforms")
+                if req_transforms and isinstance(req_transforms, dict):
+                    if "add_headers" in req_transforms:
+                        for k, v in req_transforms["add_headers"].items():
+                            fwd_api.headers[k] = v
+                    logger.debug("[TRANSFORM] Applied request transforms for '%s'", identifier)
+            except Exception:
+                pass
+
+            flask_resp, duration_ms, raw_resp = fwd_api.forward()
+
+            try:
+                if _transforms_state:
+                    resp_transforms = _transforms_state.get("_response_transforms")
+                    if resp_transforms and isinstance(resp_transforms, dict):
+                        if "add_headers" in resp_transforms:
+                            resp_obj = flask_resp[0] if isinstance(flask_resp, tuple) else flask_resp
+                            for k, v in resp_transforms["add_headers"].items():
+                                resp_obj.headers[k] = v
+                        logger.debug("[TRANSFORM] Applied response transforms for '%s'", identifier)
+            except Exception:
+                pass
+
             db_log_request(
                 identifier, endpoint, method, req_headers, req_body, query_string,
                 raw_resp.status_code, raw_resp.content[:2000].decode("utf-8", errors="replace"), "forward", duration_ms,

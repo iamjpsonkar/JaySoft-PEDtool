@@ -521,12 +521,99 @@ async function createMock() {
     try {
         var data = await api('/proxy/mock/create/', 'POST', payload);
         showToast('Mock saved for ' + payload.method + ' ' + payload.end_point, 'success');
-        showResponse('mainResponse', data);
+        // Show diff if old_mock exists (Feature 10)
+        if (data.old_mock && data.new_mock) {
+            showMockDiff(data.old_mock, data.new_mock);
+        } else {
+            showResponse('mainResponse', data);
+        }
         if (document.getElementById('mocks_proxy_id').value === payload.proxy_identifier) {
             loadMocks();
         }
     } catch (e) {
         showToast((e.data && e.data.error) || 'Mock creation failed', 'error');
+        showResponse('mainResponse', e.data || e);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Mock Diff View (Feature 10)                                       */
+/* ------------------------------------------------------------------ */
+
+function showMockDiff(oldMock, newMock) {
+    var el = document.getElementById('mainResponse');
+    var diff = jsonDiff(oldMock, newMock, '');
+    if (diff.length === 0) {
+        el.innerHTML = '<button class="copy-btn" onclick="copyResponse(this)">Copy</button>' +
+            '<span style="color:var(--text-muted);">No changes detected.</span>';
+    } else {
+        var html = '<button class="copy-btn" onclick="copyResponse(this)">Copy</button>';
+        html += '<div class="mock-diff">';
+        diff.forEach(function(d) {
+            var cls = d.type === 'added' ? 'diff-added' : (d.type === 'removed' ? 'diff-removed' : 'diff-changed');
+            html += '<div class="' + cls + '">';
+            html += '<span class="diff-path">' + escapeHtml(d.path) + '</span> ';
+            if (d.type === 'removed') {
+                html += '<span class="diff-old">' + escapeHtml(JSON.stringify(d.oldVal)) + '</span>';
+            } else if (d.type === 'added') {
+                html += '<span class="diff-new">' + escapeHtml(JSON.stringify(d.newVal)) + '</span>';
+            } else {
+                html += '<span class="diff-old">' + escapeHtml(JSON.stringify(d.oldVal)) + '</span>';
+                html += ' &rarr; ';
+                html += '<span class="diff-new">' + escapeHtml(JSON.stringify(d.newVal)) + '</span>';
+            }
+            html += '</div>';
+        });
+        html += '</div>';
+        el.innerHTML = html;
+    }
+    el.classList.add('visible');
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function jsonDiff(a, b, path) {
+    var diffs = [];
+    if (a === b) return diffs;
+    if (typeof a !== typeof b || a === null || b === null ||
+        typeof a !== 'object' || typeof b !== 'object' ||
+        Array.isArray(a) !== Array.isArray(b)) {
+        diffs.push({ path: path || '(root)', type: 'changed', oldVal: a, newVal: b });
+        return diffs;
+    }
+    if (Array.isArray(a)) {
+        var maxLen = Math.max(a.length, b.length);
+        for (var i = 0; i < maxLen; i++) {
+            var p = path + '[' + i + ']';
+            if (i >= a.length) { diffs.push({ path: p, type: 'added', newVal: b[i] }); }
+            else if (i >= b.length) { diffs.push({ path: p, type: 'removed', oldVal: a[i] }); }
+            else { diffs = diffs.concat(jsonDiff(a[i], b[i], p)); }
+        }
+        return diffs;
+    }
+    var allKeys = new Set(Object.keys(a).concat(Object.keys(b)));
+    allKeys.forEach(function(key) {
+        var p = path ? path + '.' + key : key;
+        if (!(key in a)) { diffs.push({ path: p, type: 'added', newVal: b[key] }); }
+        else if (!(key in b)) { diffs.push({ path: p, type: 'removed', oldVal: a[key] }); }
+        else { diffs = diffs.concat(jsonDiff(a[key], b[key], p)); }
+    });
+    return diffs;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Mock Validation / Dry-Run (Feature 3 — UI)                        */
+/* ------------------------------------------------------------------ */
+
+async function validateMock() {
+    var payload = getMockPayload();
+    if (!payload) return;
+    var body = { mock: payload.mock, proxy_identifier: payload.proxy_identifier };
+    try {
+        var data = await api('/proxy/mock/validate/', 'POST', body);
+        showResponse('mainResponse', data);
+        showToast(data.valid ? 'Mock is valid' : 'Mock has errors', data.valid ? 'success' : 'error');
+    } catch (e) {
+        showToast('Validation failed', 'error');
         showResponse('mainResponse', e.data || e);
     }
 }
@@ -614,24 +701,101 @@ function renderMocksTable(mocks) {
         container.innerHTML = '<div class="empty-state"><p>No mocks configured for this proxy.</p></div>';
         return;
     }
-    var html = '<table class="mock-table">' +
-        '<thead><tr><th>Method</th><th>Endpoint</th><th>Response Preview</th><th>Actions</th></tr></thead><tbody>';
+    var proxyId = document.getElementById('mocks_proxy_id').value.trim();
+    var html = '<div style="margin-bottom:8px;">' +
+        '<button class="btn btn-red btn-sm" onclick="bulkDeleteSelected()" id="bulkDeleteBtn" style="display:none;">Delete Selected</button></div>';
+    html += '<table class="mock-table">' +
+        '<thead><tr><th><input type="checkbox" onchange="toggleBulkAll(this)"></th><th>Method</th><th>Endpoint</th><th>Response Preview</th><th>Actions</th></tr></thead><tbody>';
     _loadedMocks.forEach(function(e, idx) {
         var preview = JSON.stringify(e.body);
         if (preview.length > 100) preview = preview.substring(0, 100) + '...';
         html += '<tr id="mock-row-' + idx + '">' +
+            '<td><input type="checkbox" class="bulk-check" data-idx="' + idx + '" onchange="onBulkCheck()"></td>' +
             '<td><span class="method-badge method-' + escapeAttr(e.method) + '">' + escapeHtml(e.method) + '</span></td>' +
             '<td style="font-family:var(--mono);font-size:0.82rem;">' + escapeHtml(e.endpoint) + '</td>' +
             '<td class="mock-preview">' + escapeHtml(preview) + '</td>' +
             '<td style="white-space:nowrap;">' +
-                '<button class="btn btn-outline btn-sm" onclick="viewMockByIdx(' + idx + ')" title="View full response">View</button> ' +
-                '<button class="btn btn-outline btn-sm" onclick="editMockByIdx(' + idx + ')" title="Load into editor">Edit</button> ' +
-                '<button class="btn btn-outline btn-sm" id="del-btn-' + idx + '" onclick="confirmDelete(' + idx + ')" title="Delete this mock" style="color:var(--red);border-color:var(--red);">Delete</button>' +
+                '<button class="btn btn-outline btn-sm" onclick="viewMockByIdx(' + idx + ')" title="View">View</button> ' +
+                '<button class="btn btn-outline btn-sm" onclick="editMockByIdx(' + idx + ')" title="Edit">Edit</button> ' +
+                '<button class="btn btn-outline btn-sm" onclick="shareMock(' + idx + ')" title="Copy share link">Share</button> ' +
+                '<button class="btn btn-outline btn-sm" id="del-btn-' + idx + '" onclick="confirmDelete(' + idx + ')" title="Delete" style="color:var(--red);border-color:var(--red);">Delete</button>' +
             '</td>' +
         '</tr>';
     });
     html += '</tbody></table>';
     container.innerHTML = html;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Bulk Delete (Feature 7 — UI)                                      */
+/* ------------------------------------------------------------------ */
+
+function toggleBulkAll(master) {
+    document.querySelectorAll('.bulk-check').forEach(function(cb) { cb.checked = master.checked; });
+    onBulkCheck();
+}
+
+function onBulkCheck() {
+    var any = document.querySelectorAll('.bulk-check:checked').length > 0;
+    var btn = document.getElementById('bulkDeleteBtn');
+    if (btn) btn.style.display = any ? 'inline-block' : 'none';
+}
+
+async function bulkDeleteSelected() {
+    var checked = document.querySelectorAll('.bulk-check:checked');
+    if (checked.length === 0) return;
+    if (!confirm('Delete ' + checked.length + ' selected mock(s)?')) return;
+    var proxyId = document.getElementById('mocks_proxy_id').value.trim();
+    var ops = [];
+    checked.forEach(function(cb) {
+        var idx = parseInt(cb.dataset.idx);
+        var m = _loadedMocks[idx];
+        if (m) ops.push({ action: 'delete', end_point: m.endpoint, method: m.method });
+    });
+    try {
+        var data = await api('/proxy/mock/batch/', 'POST', { proxy_identifier: proxyId, operations: ops });
+        showToast('Deleted ' + data.total_processed + ' mock(s).', 'success');
+        loadMocks();
+    } catch (e) {
+        handleApiError(e);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Shareable Links (Feature 11)                                      */
+/* ------------------------------------------------------------------ */
+
+function shareMock(idx) {
+    var m = _loadedMocks[idx];
+    if (!m) return;
+    var proxyId = document.getElementById('mocks_proxy_id').value.trim();
+    var url = window.location.origin + '/proxy/?proxy=' + encodeURIComponent(proxyId) +
+        '&endpoint=' + btoa(m.endpoint) + '&method=' + encodeURIComponent(m.method);
+    navigator.clipboard.writeText(url);
+    showToast('Share link copied to clipboard', 'success');
+}
+
+// On page load, check for share link params
+function _checkShareLink() {
+    var params = new URLSearchParams(window.location.search);
+    var proxy = params.get('proxy');
+    var epB64 = params.get('endpoint');
+    var method = params.get('method');
+    if (proxy && epB64) {
+        try {
+            var endpoint = atob(epB64);
+            document.getElementById('mocks_proxy_id').value = proxy;
+            document.getElementById('mock_proxy_id').value = proxy;
+            // Load mocks then find and edit the specific one
+            setTimeout(async function() {
+                await loadMocks();
+                var found = _loadedMocks.findIndex(function(m) {
+                    return m.endpoint === endpoint && (!method || m.method === method);
+                });
+                if (found >= 0) editMockByIdx(found);
+            }, 100);
+        } catch (e) { /* invalid base64 */ }
+    }
 }
 
 // --- View ---
@@ -818,3 +982,43 @@ async function doDelete(idx) {
         cancelDelete(idx, document.querySelector('#mock-row-' + idx + ' td:last-child button'));
     }
 }
+
+/* ------------------------------------------------------------------ */
+/*  Mock Templates (Feature 13 — UI)                                  */
+/* ------------------------------------------------------------------ */
+
+async function loadTemplates() {
+    try {
+        var data = await api('/proxy/templates/', 'GET');
+        var templates = data.templates || [];
+        var sel = document.getElementById('templateSelect');
+        if (!sel) return;
+        sel.innerHTML = '<option value="">-- Select a template --</option>';
+        templates.forEach(function(t) {
+            sel.innerHTML += '<option value="' + t.id + '">' + escapeHtml(t.name) +
+                (t.category ? ' [' + escapeHtml(t.category) + ']' : '') + '</option>';
+        });
+    } catch (e) { /* templates not available */ }
+}
+
+async function applyTemplate() {
+    var sel = document.getElementById('templateSelect');
+    if (!sel || !sel.value) { showToast('Select a template first', 'error'); return; }
+    try {
+        var data = await api('/proxy/templates/' + sel.value + '/', 'GET');
+        if (data.template) {
+            switchTab('raw');
+            document.getElementById('mock_json_raw').value = JSON.stringify(data.template, null, 2);
+            showToast('Template "' + data.name + '" loaded', 'success');
+        }
+    } catch (e) { handleApiError(e); }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Init on page load                                                 */
+/* ------------------------------------------------------------------ */
+
+document.addEventListener('DOMContentLoaded', function() {
+    _checkShareLink();
+    loadTemplates();
+});

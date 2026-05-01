@@ -82,3 +82,22 @@
 /* --- Clickable rows --- */
 .clickable-row { cursor: pointer; }
 .clickable-row:hover td { background: var(--primary-light) !important; }
+
+/* --- Analytics stat cards (Feature 14) --- */
+.stat-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px 16px; text-align: center;
+    transition: background var(--transition), border-color var(--transition);
+}
+.stat-value { font-size: 1.5rem; font-weight: 700; color: var(--primary); }
+.stat-label { font-size: 0.78rem; color: var(--text-muted); margin-top: 4px; }
+
+/* --- History filter bar --- */
+.history-filters {
+    display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; align-items: flex-end;
+}
+.history-filters select, .history-filters input {
+    font-size: 0.82rem; padding: 4px 8px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: var(--surface); color: var(--text);
+}
+.history-filters label { font-size: 0.75rem; color: var(--text-muted); }

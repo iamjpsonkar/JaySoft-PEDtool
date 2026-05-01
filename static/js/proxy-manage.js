@@ -238,8 +238,11 @@ function exportPostman(id) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Request History                                                   */
+/*  Request History with Filters (Feature 4)                          */
 /* ------------------------------------------------------------------ */
+
+// Store last loaded history for replay
+var _historyEntries = [];
 
 async function loadHistory() {
     var id = document.getElementById('historyProxyId').value.trim();
@@ -249,16 +252,34 @@ async function loadHistory() {
     }
     var container = document.getElementById('historyContainer');
     container.innerHTML = '<div class="empty-state"><p>Loading history...</p></div>';
+
+    // Build query params from filter inputs
+    var params = new URLSearchParams();
+    var filterMethod = document.getElementById('historyFilterMethod');
+    var filterEndpoint = document.getElementById('historyFilterEndpoint');
+    var filterSource = document.getElementById('historyFilterSource');
+    var filterStatusMin = document.getElementById('historyFilterStatusMin');
+    var filterStatusMax = document.getElementById('historyFilterStatusMax');
+    if (filterMethod && filterMethod.value) params.set('method', filterMethod.value);
+    if (filterEndpoint && filterEndpoint.value.trim()) params.set('endpoint', filterEndpoint.value.trim());
+    if (filterSource && filterSource.value) params.set('source', filterSource.value);
+    if (filterStatusMin && filterStatusMin.value) params.set('status_min', filterStatusMin.value);
+    if (filterStatusMax && filterStatusMax.value) params.set('status_max', filterStatusMax.value);
+
+    var qs = params.toString();
+    var url = '/proxy/history/' + encodeURIComponent(id) + '/' + (qs ? '?' + qs : '');
+
     try {
-        var data = await api('/proxy/history/' + encodeURIComponent(id) + '/', 'GET');
+        var data = await api(url, 'GET');
         var history = data.history || data.requests || data || [];
         if (!Array.isArray(history)) history = [];
+        _historyEntries = history;
         if (history.length === 0) {
-            container.innerHTML = '<div class="empty-state"><p>No request history found for this proxy.</p></div>';
+            container.innerHTML = '<div class="empty-state"><p>No request history found.</p></div>';
             return;
         }
         var html = '<table class="mock-table"><thead><tr>' +
-            '<th>Timestamp</th><th>Method</th><th>Endpoint</th><th>Source</th><th>Status</th><th>Duration (ms)</th>' +
+            '<th>Timestamp</th><th>Method</th><th>Endpoint</th><th>Source</th><th>Status</th><th>Duration</th><th>Actions</th>' +
             '</tr></thead><tbody>';
         history.forEach(function(entry, idx) {
             var method = entry.method || 'GET';
@@ -267,19 +288,19 @@ async function loadHistory() {
             var tsRaw = entry.created_at || entry.timestamp;
             var ts = tsRaw ? new Date(tsRaw).toLocaleString() : '-';
             var status = entry.response_status || entry.status || entry.status_code || '-';
-            var duration = entry.duration_ms !== undefined ? entry.duration_ms : (entry.duration !== undefined ? entry.duration : '-');
+            var duration = entry.duration_ms !== undefined ? entry.duration_ms : '-';
 
             html += '<tr class="clickable-row" onclick="toggleHistoryDetail(' + idx + ')">' +
                 '<td>' + escapeHtml(ts) + '</td>' +
                 '<td><span class="method-badge method-' + escapeAttr(method) + '">' + escapeHtml(method) + '</span></td>' +
-                '<td class="mock-preview">' + escapeHtml(entry.endpoint || entry.path || entry.url || '-') + '</td>' +
+                '<td class="mock-preview">' + escapeHtml(entry.endpoint || '-') + '</td>' +
                 '<td><span class="source-badge ' + escapeAttr(sourceBadgeClass) + '">' + escapeHtml(source) + '</span></td>' +
                 '<td>' + escapeHtml(String(status)) + '</td>' +
-                '<td>' + escapeHtml(String(duration)) + '</td>' +
+                '<td>' + escapeHtml(String(duration)) + 'ms</td>' +
+                '<td><button class="btn btn-blue btn-sm" onclick="event.stopPropagation();replayRequest(' + idx + ')" title="Replay this request">Replay</button></td>' +
                 '</tr>';
 
-            // Detail row
-            html += '<tr class="history-detail" id="historyDetail-' + idx + '"><td colspan="6">';
+            html += '<tr class="history-detail" id="historyDetail-' + idx + '"><td colspan="7">';
             html += '<div class="history-detail-label">Request Headers</div>';
             html += '<pre>' + escapeHtml(formatJson(entry.request_headers || {})) + '</pre>';
             html += '<div class="history-detail-label">Request Body</div>';
@@ -301,6 +322,36 @@ function toggleHistoryDetail(idx) {
     if (row) row.classList.toggle('visible');
 }
 
+/* ------------------------------------------------------------------ */
+/*  Request Replay (Feature 2)                                        */
+/* ------------------------------------------------------------------ */
+
+async function replayRequest(idx) {
+    var entry = _historyEntries[idx];
+    if (!entry) return;
+    var id = document.getElementById('historyProxyId').value.trim();
+    var endpoint = entry.endpoint || '';
+    var method = entry.method || 'GET';
+    var cleanEp = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+    var url = '/proxy/' + encodeURIComponent(id) + '/' + cleanEp;
+    if (entry.query_params) url += '?' + entry.query_params;
+
+    var body = undefined;
+    if (method !== 'GET' && method !== 'HEAD' && entry.request_body) {
+        body = typeof entry.request_body === 'string' ? JSON.parse(entry.request_body) : entry.request_body;
+    }
+
+    showToast('Replaying ' + method + ' ' + endpoint + '...', 'success');
+    try {
+        var data = await api(url, method, body);
+        showToast('Replay succeeded', 'success');
+        showResponse('mainResponse', data);
+    } catch (e) {
+        showToast('Replay returned ' + (e.status || 'error'), 'error');
+        showResponse('mainResponse', e.data || e);
+    }
+}
+
 async function clearHistory() {
     var id = document.getElementById('historyProxyId').value.trim();
     if (!id) {
@@ -309,12 +360,141 @@ async function clearHistory() {
     }
     if (!confirm('Clear all request history for "' + id + '"?')) return;
     try {
-        var data = await api('/proxy/history/' + encodeURIComponent(id) + '/clear/', 'POST');
+        await api('/proxy/history/' + encodeURIComponent(id) + '/clear/', 'POST');
         showToast('History cleared for "' + id + '".', 'success');
         document.getElementById('historyContainer').innerHTML = '<div class="empty-state"><p>History cleared.</p></div>';
     } catch (err) {
         handleApiError(err);
     }
+}
+
+/* ------------------------------------------------------------------ */
+/*  State Snapshots (Feature 6)                                       */
+/* ------------------------------------------------------------------ */
+
+async function saveSnapshot() {
+    var id = document.getElementById('historyProxyId').value.trim();
+    if (!id) { showToast('Enter a proxy identifier first.', 'error'); return; }
+    var name = prompt('Snapshot name:', 'snapshot_' + new Date().toISOString().slice(0,16).replace(/[:-]/g,''));
+    if (!name) return;
+    try {
+        var data = await api('/proxy/state/' + encodeURIComponent(id) + '/snapshot/', 'POST', { name: name });
+        showToast('Snapshot "' + name + '" saved.', 'success');
+        loadSnapshots(id);
+    } catch (err) { handleApiError(err); }
+}
+
+async function loadSnapshots(id) {
+    if (!id) id = document.getElementById('historyProxyId').value.trim();
+    if (!id) return;
+    var container = document.getElementById('snapshotsContainer');
+    if (!container) return;
+    try {
+        var data = await api('/proxy/state/' + encodeURIComponent(id) + '/snapshots/', 'GET');
+        var snaps = data.snapshots || [];
+        if (snaps.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>No snapshots.</p></div>';
+            return;
+        }
+        var html = '<table class="mock-table"><thead><tr><th>Name</th><th>Created</th><th>Actions</th></tr></thead><tbody>';
+        snaps.forEach(function(s) {
+            html += '<tr><td>' + escapeHtml(s.name) + '</td>' +
+                '<td>' + escapeHtml(s.created_at || '-') + '</td>' +
+                '<td><button class="btn btn-blue btn-sm" onclick="restoreSnapshot(' + s.id + ')">Restore</button> ' +
+                '<button class="btn btn-red btn-sm" onclick="deleteSnapshot(' + s.id + ')">Delete</button></td></tr>';
+        });
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    } catch (err) { container.innerHTML = '<div class="empty-state"><p>Failed to load snapshots.</p></div>'; }
+}
+
+async function restoreSnapshot(snapId) {
+    if (!confirm('Restore state from this snapshot?')) return;
+    try {
+        var data = await api('/proxy/state/restore/' + snapId + '/', 'POST');
+        showToast('State restored from snapshot.', 'success');
+        showResponse('mainResponse', data);
+    } catch (err) { handleApiError(err); }
+}
+
+async function deleteSnapshot(snapId) {
+    if (!confirm('Delete this snapshot?')) return;
+    try {
+        await api('/proxy/state/snapshot/' + snapId + '/', 'DELETE');
+        showToast('Snapshot deleted.', 'success');
+        var id = document.getElementById('historyProxyId').value.trim();
+        loadSnapshots(id);
+    } catch (err) { handleApiError(err); }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Analytics (Feature 14)                                            */
+/* ------------------------------------------------------------------ */
+
+async function loadAnalytics() {
+    var id = document.getElementById('historyProxyId').value.trim();
+    if (!id) { showToast('Enter a proxy identifier.', 'error'); return; }
+    try {
+        var data = await api('/proxy/analytics/' + encodeURIComponent(id) + '/', 'GET');
+        var html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px;">';
+        html += '<div class="stat-card"><div class="stat-value">' + (data.total_requests || 0) + '</div><div class="stat-label">Total Requests</div></div>';
+        html += '<div class="stat-card"><div class="stat-value">' + (data.avg_latency_ms != null ? data.avg_latency_ms + 'ms' : '-') + '</div><div class="stat-label">Avg Latency</div></div>';
+        html += '<div class="stat-card"><div class="stat-value">' + (data.error_rate || 0) + '%</div><div class="stat-label">Error Rate</div></div>';
+        html += '<div class="stat-card"><div class="stat-value">' + (data.stale_mocks ? data.stale_mocks.length : 0) + '</div><div class="stat-label">Stale Mocks</div></div>';
+        html += '</div>';
+        if (data.by_source) {
+            html += '<div class="history-detail-label">By Source</div><pre>' + escapeHtml(formatJson(data.by_source)) + '</pre>';
+        }
+        if (data.top_endpoints && data.top_endpoints.length) {
+            html += '<div class="history-detail-label">Top Endpoints</div>';
+            html += '<table class="mock-table"><thead><tr><th>Endpoint</th><th>Method</th><th>Hits</th></tr></thead><tbody>';
+            data.top_endpoints.forEach(function(ep) {
+                html += '<tr><td>' + escapeHtml(ep.endpoint) + '</td><td>' + escapeHtml(ep.method) + '</td><td>' + ep.hits + '</td></tr>';
+            });
+            html += '</tbody></table>';
+        }
+        showResponse('mainResponse', data);
+        var container = document.getElementById('analyticsContainer');
+        if (container) container.innerHTML = html;
+    } catch (err) { handleApiError(err); }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Storage Info                                                      */
+/* ------------------------------------------------------------------ */
+
+async function loadStorageInfo() {
+    try {
+        var data = await api('/proxy/storage/', 'GET');
+        showResponse('mainResponse', data);
+        showToast('DB size: ' + data.db_size_mb + ' MB, History: ' + data.history_count + ' rows', 'success');
+    } catch (err) { handleApiError(err); }
+}
+
+async function runCleanup() {
+    var days = prompt('Delete history older than (days):', '7');
+    if (days === null) return;
+    try {
+        var data = await api('/proxy/storage/cleanup/', 'POST', { keep_days: parseInt(days), vacuum: true });
+        showToast('Cleaned up! Saved ' + data.saved_mb + ' MB', 'success');
+        showResponse('mainResponse', data);
+    } catch (err) { handleApiError(err); }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Proxy Health (Feature 17)                                         */
+/* ------------------------------------------------------------------ */
+
+async function checkProxyHealth(id) {
+    if (!id) id = document.getElementById('historyProxyId').value.trim();
+    if (!id) { showToast('Enter a proxy identifier.', 'error'); return; }
+    try {
+        var data = await api('/proxy/health/' + encodeURIComponent(id) + '/', 'GET');
+        showResponse('mainResponse', data);
+        var status = data.upstream_status || 'unknown';
+        var color = status === 'healthy' ? 'success' : (status === 'degraded' ? 'error' : 'error');
+        showToast(id + ': ' + status + (data.upstream_latency_ms ? ' (' + data.upstream_latency_ms + 'ms)' : ''), color);
+    } catch (err) { handleApiError(err); }
 }
 
 /* ------------------------------------------------------------------ */

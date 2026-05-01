@@ -28,11 +28,20 @@
     </div>
 
     <div class="toolbar">
-        <!-- Prettify group -->
+        <!-- Prettify / Minify group -->
         <div class="toolbar-group">
             <input type="checkbox" id="processEscape" />
             <label for="processEscape">Process Escapes</label>
             <button class="btn btn-blue" onclick="prettify()">Prettify</button>
+            <button class="btn btn-outline" onclick="minifyJson()">Minify</button>
+        </div>
+
+        <!-- JSON Tools group -->
+        <div class="toolbar-group">
+            <button class="btn btn-outline" onclick="jsonPathQuery()">Path Query</button>
+            <button class="btn btn-outline" onclick="jsonDiffTool()">Diff</button>
+            <button class="btn btn-outline" onclick="jsonSchemaValidate()">Validate Schema</button>
+            <button class="btn btn-outline" onclick="jsonTransform()">Transform</button>
         </div>
 
         <!-- Encrypt/Decrypt group -->

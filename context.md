@@ -9,8 +9,8 @@
 **Name:** PED Tools  
 **Type:** Flask web application (Python 3.9+)  
 **Purpose:** HTTP proxy, mock server, and AES encryption utility for development and testing workflows.  
-**Primary file:** `app.py` (~3090 lines)  
-**Database:** SQLite (proxies, mocks, history, sequences, state, proxy_users) — MongoDB optional for raw_mongo_* helpers only  
+**Primary file:** `app.py` (~4830 lines)
+**Database:** SQLite (proxies, mocks, history, sequences, state, proxy_users, state_snapshots, mock_templates) — MongoDB optional for raw_mongo_* helpers only  
 **Frontend:** Server-rendered Jinja2 templates + vanilla JS  
 **Auth:** Session cookie (UI) or Bearer token (API)
 
@@ -74,6 +74,10 @@ All read at module import time from `.env` (via `python-dotenv`) then `os.enviro
 | `PED_HISTORY_LIMIT` | `100` | Max history rows per proxy |
 | `PED_RATE_LIMIT_MAX` | `0` | Per-proxy in-memory rate limit (0 = disabled) |
 | `PED_RATE_LIMIT_WINDOW` | `60` | Rate limit window (seconds) |
+| `PED_CORS_ORIGINS` | `""` | CORS origins (comma-separated; empty=disabled, `*`=allow all) |
+| `PED_MOCK_ENV_PREFIX` | `MOCK_` | Prefix for `envget()` env var access restriction |
+| `PED_MAX_SNAPSHOTS` | `20` | Max state snapshots per proxy |
+| `PED_MOCK_CACHE_MAX` | `200` | Max in-memory mock response cache entries |
 
 ---
 
@@ -83,17 +87,21 @@ All read at module import time from `.env` (via `python-dotenv`) then `os.enviro
 proxies (identifier PK, api_domain, created_at)
 
 mocks (id AUTOINCREMENT, proxy_id FK→proxies, endpoint, method, response TEXT,
-       created_at, updated_at; UNIQUE(proxy_id, endpoint, method))
+       tags TEXT DEFAULT '', created_at, updated_at; UNIQUE(proxy_id, endpoint, method))
 
 request_history (id, proxy_id, endpoint, method, request_headers, request_body,
                  query_params, response_status, response_body,
-                 source TEXT ['forward'|'mock'|'redirect'|'mock_register'],
+                 source TEXT ['forward'|'mock'|'redirect'|'mock_register'|'mock_miss'],
                  duration_ms, created_at)
 
 mock_sequences (id, proxy_id, endpoint, method, call_count; UNIQUE(proxy_id, endpoint, method))
+
+state_snapshots (id, proxy_id, name, data TEXT, created_at)
+
+mock_templates (id, name UNIQUE, description, template TEXT, category, created_at)
 ```
 
-Indices: `idx_mocks_proxy`, `idx_mocks_lookup`, `idx_history_proxy`, `idx_history_time`.
+Indices: `idx_mocks_proxy`, `idx_mocks_lookup`, `idx_history_proxy`, `idx_history_time`, `idx_snapshots_proxy`.
 
 ---
 
@@ -165,6 +173,11 @@ Security headers added via `@app.after_request` hook:
 | `POST` | `/ped/encrypt` | `encrypt_endpoint` | |
 | `POST` | `/ped/decrypt` | `decrypt_endpoint` | |
 | `POST` | `/ped/prettify` | `prettify` | |
+| `POST` | `/ped/minify` | `minify` | Compact JSON output |
+| `POST` | `/ped/jsonpath` | `jsonpath_query` | Dot-path extraction from JSON |
+| `POST` | `/ped/diff` | `json_diff` | Structured diff of two JSON documents |
+| `POST` | `/ped/validate-schema` | `validate_json_schema` | Lightweight JSON Schema validation |
+| `POST` | `/ped/transform` | `json_transform` | Pipeline of transform operations |
 | `GET/POST` | `/login` | `login_page` | |
 | `GET` | `/logout` | `logout` | |
 | `GET` | `/` | `index` | `@require_login` redirect |
@@ -175,7 +188,19 @@ Security headers added via `@app.after_request` hook:
 | `POST` | `/proxy/sequence/reset/` | `reset_sequence` | **No auth** |
 | `GET/PUT/PATCH/DELETE` | `/proxy/state/<id>/` | state handlers | **No auth** |
 | `GET` | `/proxy/ratelimit/<id>/` | `get_rate_limit` | **No auth** |
+| `POST` | `/proxy/mock/validate/` | `validate_mock` | **No auth** — dry-run mock validation |
+| `POST` | `/proxy/mock/batch/` | `batch_mock_ops` | **No auth** — bulk create/delete mocks |
+| `POST` | `/proxy/mock/tags/` | `update_mock_tags` | **No auth** — set tags on a mock |
+| `GET` | `/proxy/mocks/<id>/` | `list_mocks_with_tags` | **No auth** — list mocks with tags |
+| `POST` | `/proxy/state/<id>/snapshot/` | `save_snapshot_route` | **No auth** |
+| `GET` | `/proxy/state/<id>/snapshots/` | `list_snapshots_route` | **No auth** |
+| `POST` | `/proxy/state/restore/<snap_id>/` | `restore_snapshot_route` | **No auth** |
+| `DELETE` | `/proxy/state/snapshot/<snap_id>/` | `delete_snapshot_route` | **No auth** |
+| `GET` | `/proxy/templates/` | `list_templates_route` | **No auth** |
+| `GET` | `/proxy/templates/<id>/` | `get_template_route` | **No auth** |
+| `GET` | `/proxy/health/<id>/` | `proxy_health` | **No auth** — upstream health check |
 | `ANY` | `/proxy/<id>/<path>` | `proxy_request` | **No auth** — main proxy handler |
+| `OPTIONS` | `/proxy/<id>/<path>` | `_cors_preflight` | **No auth** — CORS preflight |
 | `POST` | `/mock/<id>/<path>` | `register_mock_by_url` | **No auth** |
 
 ### Authenticated (`@require_auth`) routes
@@ -194,6 +219,11 @@ Security headers added via `@app.after_request` hook:
 | `GET` | `/proxy/users/<id>/` | `get_proxy_users` |
 | `POST` | `/proxy/users/<id>/` | `upsert_proxy_user` |
 | `DELETE` | `/proxy/users/<id>/<user>/` | `delete_proxy_user_route` |
+| `POST` | `/proxy/templates/` | `create_template_route` |
+| `DELETE` | `/proxy/templates/<id>/` | `delete_template_route` |
+| `GET` | `/proxy/analytics/<id>/` | `mock_analytics` |
+| `GET` | `/proxy/storage/` | `storage_info` |
+| `POST` | `/proxy/storage/cleanup/` | `storage_cleanup` |
 
 ### UI routes (`@require_login`)
 
@@ -384,6 +414,10 @@ Used by `/ped/prettify` to extract embedded JSON structures from raw text. Uses 
 | Content-Security-Policy | ❌ | Not set — would need UI audit |
 | Plaintext proxy user passwords | ⚠️ | Intentional: used for mock simulation only |
 | Unauthenticated state-mutating endpoints | ⚠️ | By design — see route inventory above |
+| CORS headers | ✅ | Controlled by `PED_CORS_ORIGINS`; per-proxy override via state `_cors_origins` |
+| `envget()` secret leak prevention | ✅ | Restricted to env vars matching `PED_MOCK_ENV_PREFIX` |
+| `_callback` SSRF prevention | ✅ | Callback URLs checked via `_is_domain_allowed()` |
+| `_callback` delay cap | ✅ | Capped at 30,000 ms |
 
 ---
 
@@ -477,6 +511,89 @@ Common log prefixes:
 ---
 
 ## 23. Changelog (recent)
+
+### 2026-05-01 — JSON Toolbox (5 new /ped/ endpoints)
+
+**Files changed:** `app.py`, `static/js/index.js`, `templates/index.html`, `context.md`
+
+**New endpoints:**
+
+1. **`POST /ped/minify`** — Strips all whitespace from JSON, returns compact output with original/minified length stats. Accepts both string and pre-parsed JSON input.
+
+2. **`POST /ped/jsonpath`** — Dot-path extraction from JSON documents. Accepts single `path` or multiple `paths` (array). Uses the existing `_resolve_item_path` engine that powers `jsonget()` / `dbget()`. Supports dict key traversal and array index access (e.g. `items.0.name`).
+
+3. **`POST /ped/diff`** — Recursive structural diff of two JSON documents (`a` vs `b`). Returns list of changes with path, type (added/removed/changed), old/new values. Sorted keys for deterministic output. Backend function `_json_diff_recursive` handles nested dicts, lists, and type mismatches.
+
+4. **`POST /ped/validate-schema`** — Lightweight JSON Schema validation with zero external dependencies. Supports: `type` (string/number/integer/boolean/array/object/null, single or union), `required`, `properties` (recursive), `items` (recursive), `enum`, `minimum`/`maximum`, `minLength`/`maxLength`, `pattern` (regex), `minItems`/`maxItems`.
+
+5. **`POST /ped/transform`** — Pipeline of JSON transform operations. Supported ops: `pick`, `omit`, `rename`, `set` (dot-path), `delete` (dot-path), `flatten`, `unflatten`, `wrap`, `unwrap`, `sort_keys`, `defaults`, `map` (set fields on array elements). Operations applied sequentially; individual failures reported without aborting the pipeline.
+
+**UI changes (index.html):**
+- New toolbar group "JSON Tools" with 4 buttons: Path Query, Diff, Validate Schema, Transform
+- Minify button added next to Prettify
+
+**JS handlers (index.js):**
+- `minifyJson()` — sends to `/ped/minify`, shows saved chars
+- `jsonPathQuery()` — prompts for path(s), supports comma-separated multi-path
+- `jsonDiffTool()` — uses Input pane as `a`, Output pane as `b`
+- `jsonSchemaValidate()` — prompt for schema or use Output pane contents
+- `jsonTransform()` — prompt for operations JSON array with examples
+
+**Helper functions added to app.py:**
+- `_json_diff_recursive(a, b, path)` — recursive diff engine
+- `_validate_schema(value, schema, path)` — lightweight schema validator
+- `_apply_transform(data, op)` — single transform dispatcher
+- `_flatten_dict(d, sep, prefix)` — nested dict to flat dotted keys
+- `_unflatten_dict(d, sep)` — flat dotted keys to nested dict
+- `_sort_keys_recursive(data)` — recursive key sorting
+
+---
+
+### 2026-05-01 — 18 Feature Mega Release
+
+**Files changed:** `app.py` (3335→4371 lines), `bootstrap.py`, `static/js/proxy-manage.js`, `static/js/proxy-server.js`, `static/css/proxy-manage.css`, `static/css/proxy-server.css`, `templates/proxy_manage.html`, `templates/proxy_server.html`, `context.md`
+
+**New features implemented (18 total):**
+
+**P0 — Quick Wins:**
+1. **CORS Headers Support** — `PED_CORS_ORIGINS` env var (comma-separated or `*`). Per-proxy override via state key `_cors_origins`. OPTIONS preflight handled with 204. Headers set in `_set_security_headers` after_request hook.
+2. **Request Replay from History** — Replay button per history row in manage UI. Constructs fetch() from stored method/endpoint/headers/body, sends to `/proxy/<id>/<endpoint>`.
+
+**P1 — High-Impact Features:**
+3. **Mock Validation & Dry-Run** — `POST /proxy/mock/validate/` accepts mock payload + optional `test_request`. Runs resolve_mock_data in try/except, returns `{valid, errors, resolved_output, store_ops_preview}`. UI "Validate" button in mock builder.
+4. **History Search & Filtering** — `GET /proxy/history/<id>/` now accepts query params: `method`, `endpoint` (substring), `status_min`/`status_max`, `source`, `since`/`until`. Filter inputs in manage UI.
+5. **Webhook / Callback Simulation** — New `_callback` key in mock responses: `{"url", "method", "body", "headers", "delay_ms"}`. Scheduled via `threading.Timer`. Body/URL pass through resolver pipeline. SSRF guard via `_is_domain_allowed()`. Delay capped at 30s.
+6. **State Snapshots & Restore** — New `state_snapshots` table. Routes: `POST .../snapshot/` (save), `GET .../snapshots/` (list), `POST .../restore/<id>/` (restore), `DELETE .../snapshot/<id>/` (delete). Cap at 20 per proxy (PED_MAX_SNAPSHOTS). Snapshot list + restore in manage UI.
+
+**P2 — Nice-to-Have:**
+7. **Batch Mock Operations** — `POST /proxy/mock/batch/` accepts `{proxy_identifier, operations: [{action, end_point, method, mock}]}`. Bulk delete checkbox mode in mocks table UI.
+8. **Latency Simulation Profiles** — New `_delay_profile` key: `uniform(min,max)`, `normal(mean,stddev)`, `spike(base,spike,pct)`. Uses Python random module. Cap at 30s.
+9. **Environment Variable Resolver** — `envget(VAR_NAME, default)` in both `_resolve_value` and `_snippet_context`. Restricted to env vars matching `PED_MOCK_ENV_PREFIX` (default `MOCK_`).
+10. **Mock Diff View** — Client-side recursive JSON diff in proxy-server.js. Renders inline diff with color-coded additions/removals when updating an existing mock.
+11. **Shareable Mock Playground Links** — URL pattern: `/proxy/?proxy=<id>&endpoint=<b64>&method=<m>`. On load, detects params, loads mocks, opens editor. Share button copies URL to clipboard.
+
+**P3 — Future Consideration (all implemented):**
+12. **Mock Tagging & Filtering** — `tags` TEXT column added to mocks table (auto-migrated). `POST /proxy/mock/tags/` to set, `GET /proxy/mocks/<id>/` lists with tags. UI tag filter support.
+13. **Mock Templates Library** — New `mock_templates` table. CRUD routes at `/proxy/templates/`. Template dropdown in mock builder UI.
+14. **Mock Analytics Dashboard** — `GET /proxy/analytics/<id>/` computes: total requests, by source/method, avg latency, error rate, top endpoints, stale mocks. Stat cards in manage UI.
+15. **Request/Response Transform on Forward** — Per-proxy `_request_transforms` and `_response_transforms` state keys with `add_headers` support. Applied during upstream forwarding.
+16. **Mock Inheritance / Proxy Chaining** — `_parent_proxy` state key. Child inherits parent's mocks, child takes precedence on conflict. Merged at mock lookup time.
+17. **Proxy Health Dashboard** — `GET /proxy/health/<id>/` pings upstream domain via HEAD request. Returns status (healthy/degraded/unhealthy), latency, mock count, history count.
+18. **Mock Response Caching** — `_cache_ttl` key in mock responses (seconds). In-memory LRU cache keyed by proxy+endpoint+method+params. Max entries via PED_MOCK_CACHE_MAX.
+
+**Space Optimization (bonus):**
+- `GET /proxy/storage/` — DB size, row counts per table
+- `POST /proxy/storage/cleanup/` — delete old history (keep_days), orphaned snapshots, VACUUM. Returns bytes saved.
+- Storage info and cleanup buttons in manage UI.
+
+**Schema migrations (auto-applied in `_ensure_schema_ready`):**
+- `tags` column added to `mocks` table
+- `state_snapshots` table auto-created
+- `mock_templates` table auto-created
+
+**New env vars:** `PED_CORS_ORIGINS`, `PED_MOCK_ENV_PREFIX`, `PED_MAX_SNAPSHOTS`, `PED_MOCK_CACHE_MAX`
+
+---
 
 ### 2026-04-30 — Mock-only mode (skip upstream forwarding)
 

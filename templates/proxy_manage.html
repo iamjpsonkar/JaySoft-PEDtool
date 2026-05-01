@@ -86,19 +86,81 @@
         <div class="card">
             <h2>Request History</h2>
 
-            <div class="inline-form" style="margin-bottom:16px;">
+            <div class="inline-form" style="margin-bottom:12px;">
                 <div class="field" style="flex:1;max-width:300px;">
                     <label for="historyProxyId">Proxy Identifier</label>
                     <input type="text" id="historyProxyId" placeholder="my-proxy" />
                 </div>
                 <button class="btn btn-blue btn-sm" onclick="loadHistory()">Load History</button>
                 <button class="btn btn-red btn-sm" onclick="clearHistory()">Clear History</button>
+                <button class="btn btn-outline btn-sm" onclick="saveSnapshot()">Save Snapshot</button>
+                <button class="btn btn-outline btn-sm" onclick="loadAnalytics()">Analytics</button>
+                <button class="btn btn-outline btn-sm" onclick="checkProxyHealth()">Health</button>
+            </div>
+
+            <!-- History Filters (Feature 4) -->
+            <div class="history-filters">
+                <div><label>Method</label><br>
+                    <select id="historyFilterMethod">
+                        <option value="">All</option>
+                        <option value="GET">GET</option><option value="POST">POST</option>
+                        <option value="PUT">PUT</option><option value="PATCH">PATCH</option>
+                        <option value="DELETE">DELETE</option>
+                    </select>
+                </div>
+                <div><label>Endpoint</label><br>
+                    <input type="text" id="historyFilterEndpoint" placeholder="search..." style="width:140px;" />
+                </div>
+                <div><label>Source</label><br>
+                    <select id="historyFilterSource">
+                        <option value="">All</option>
+                        <option value="mock">mock</option><option value="forward">forward</option>
+                        <option value="redirect">redirect</option><option value="mock_miss">mock_miss</option>
+                    </select>
+                </div>
+                <div><label>Status Min</label><br>
+                    <input type="number" id="historyFilterStatusMin" placeholder="200" style="width:70px;" />
+                </div>
+                <div><label>Status Max</label><br>
+                    <input type="number" id="historyFilterStatusMax" placeholder="599" style="width:70px;" />
+                </div>
             </div>
 
             <div id="historyContainer">
                 <div class="empty-state">
                     <p>Enter a proxy identifier and click Load History to view requests.</p>
                 </div>
+            </div>
+        </div>
+
+        <!-- ================================================================ -->
+        <!-- State Snapshots (Feature 6)                                      -->
+        <!-- ================================================================ -->
+        <div class="card">
+            <h2>State Snapshots</h2>
+            <div id="snapshotsContainer">
+                <div class="empty-state"><p>Load history with a proxy identifier above to manage snapshots.</p></div>
+            </div>
+        </div>
+
+        <!-- ================================================================ -->
+        <!-- Analytics (Feature 14)                                           -->
+        <!-- ================================================================ -->
+        <div class="card">
+            <h2>Analytics</h2>
+            <div id="analyticsContainer">
+                <div class="empty-state"><p>Click "Analytics" above to view request analytics.</p></div>
+            </div>
+        </div>
+
+        <!-- ================================================================ -->
+        <!-- Storage Management                                               -->
+        <!-- ================================================================ -->
+        <div class="card">
+            <h2>Storage</h2>
+            <div class="inline-form">
+                <button class="btn btn-outline btn-sm" onclick="loadStorageInfo()">Check Storage</button>
+                <button class="btn btn-red btn-sm" onclick="runCleanup()">Cleanup & Vacuum</button>
             </div>
         </div>
 
