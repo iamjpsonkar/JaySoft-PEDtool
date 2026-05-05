@@ -19,6 +19,10 @@ function switchManageTab(name, el) {
     if (el) el.classList.add('active');
     var panel = document.getElementById('tab-' + name);
     if (panel) panel.classList.add('active');
+    // Auto-load data if proxy is selected
+    if (_selectedProxyId && document.getElementById('historyProxyId').value) {
+        _loadInspectorTab(name);
+    }
 }
 
 function formatJson(obj) {
@@ -69,36 +73,90 @@ async function loadProxyList() {
             container.innerHTML = '<div class="empty-state"><p>No proxies registered yet.</p></div>';
             return;
         }
-        var html = '<table class="mock-table"><thead><tr>' +
-            '<th>Identifier</th><th>API Domain</th><th>Mock Count</th><th>Created At</th><th>Actions</th>' +
-            '</tr></thead><tbody>';
-        proxies.forEach(function(p) {
-            var id = escapeAttr(p.identifier || p.id || '');
-            var domain = escapeHtml(p.api_domain || p.domain || '-');
-            var mockCount = p.mock_count !== undefined ? p.mock_count : (p.mocks_count !== undefined ? p.mocks_count : '-');
-            var created = p.created_at ? new Date(p.created_at).toLocaleString() : '-';
-            html += '<tr>' +
-                '<td><strong>' + escapeHtml(id) + '</strong></td>' +
-                '<td class="mock-preview">' + domain + '</td>' +
-                '<td>' + mockCount + '</td>' +
-                '<td>' + escapeHtml(created) + '</td>' +
-                '<td style="white-space:nowrap;">' +
-                    '<button class="btn btn-blue btn-sm" onclick="viewMocks(\'' + id + '\')">View Mocks</button> ' +
-                    '<button class="btn btn-outline btn-sm" onclick="fillClone(\'' + id + '\')">Clone</button> ' +
-                    '<button class="btn btn-green btn-sm" onclick="exportProxy(\'' + id + '\')">Export</button> ' +
-                    '<button class="btn btn-outline btn-sm" onclick="exportPostman(\'' + id + '\')" title="Download Postman collection">Postman</button> ' +
-                    '<span id="del-' + id + '">' +
-                        '<button class="btn btn-red btn-sm" onclick="confirmDelete(\'' + id + '\')">Delete</button>' +
-                    '</span>' +
-                '</td>' +
-                '</tr>';
-        });
-        html += '</tbody></table>';
-        container.innerHTML = html;
+        _proxyList = proxies;
+        _renderProxyTable(proxies);
     } catch (err) {
         handleApiError(err);
         container.innerHTML = '<div class="empty-state"><p>Failed to load proxy list.</p></div>';
     }
+}
+
+var _proxyList = [];
+var _selectedProxyId = '';
+
+function _renderProxyTable(proxies) {
+    var container = document.getElementById('proxyListContainer');
+    if (proxies.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>No proxies match your search.</p></div>';
+        return;
+    }
+    var html = '<div class="table-responsive"><table class="mock-table"><thead><tr>' +
+        '<th>Identifier</th><th>API Domain</th><th>Mocks</th><th>Created</th><th>Actions</th>' +
+        '</tr></thead><tbody>';
+    proxies.forEach(function(p) {
+        var id = escapeAttr(p.identifier || p.id || '');
+        var domain = escapeHtml(p.api_domain || p.domain || '-');
+        var mockCount = p.mock_count !== undefined ? p.mock_count : '-';
+        var created = p.created_at ? new Date(p.created_at).toLocaleDateString() : '-';
+        var selected = (id === _selectedProxyId) ? ' proxy-row-selected' : '';
+        html += '<tr class="clickable-row' + selected + '" onclick="selectProxy(\'' + id + '\')">' +
+            '<td><strong>' + escapeHtml(id) + '</strong></td>' +
+            '<td class="mock-preview">' + domain + '</td>' +
+            '<td>' + mockCount + '</td>' +
+            '<td>' + escapeHtml(created) + '</td>' +
+            '<td style="white-space:nowrap;" onclick="event.stopPropagation()">' +
+                '<button class="btn btn-blue btn-sm" onclick="viewMocks(\'' + id + '\')">Mocks</button> ' +
+                '<button class="btn btn-outline btn-sm" onclick="fillClone(\'' + id + '\')">Clone</button> ' +
+                '<button class="btn btn-green btn-sm" onclick="exportProxy(\'' + id + '\')">Export</button> ' +
+                '<button class="btn btn-outline btn-sm" onclick="exportPostman(\'' + id + '\')" title="Postman">PM</button> ' +
+                '<span id="del-' + id + '">' +
+                    '<button class="btn btn-red btn-sm" onclick="confirmDelete(\'' + id + '\')">Del</button>' +
+                '</span>' +
+            '</td>' +
+            '</tr>';
+    });
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+function selectProxy(id) {
+    _selectedProxyId = id;
+    // Fill inspector input
+    document.getElementById('historyProxyId').value = id;
+    // Re-render table to show selection
+    _renderProxyTable(_proxyList);
+    // Load the active tab's data
+    var activeTab = document.querySelector('.tab-bar-item.active');
+    var tabName = activeTab ? activeTab.dataset.tab : 'history';
+    _loadInspectorTab(tabName);
+    showToast('Selected: ' + id, 'success');
+}
+
+function _loadInspectorTab(name) {
+    switch(name) {
+        case 'history': loadHistory(); break;
+        case 'snapshots': loadSnapshots(); break;
+        case 'analytics': loadAnalytics(); break;
+        case 'health': checkProxyHealth(); break;
+        case 'storage': loadStorageInfo(); break;
+        case 'state': loadState(); break;
+        case 'users': loadUsers(); break;
+    }
+}
+
+function filterProxyList() {
+    var query = (document.getElementById('proxySearchInput') || {}).value || '';
+    query = query.trim().toLowerCase();
+    if (!query) {
+        _renderProxyTable(_proxyList);
+        return;
+    }
+    var filtered = _proxyList.filter(function(p) {
+        var id = (p.identifier || p.id || '').toLowerCase();
+        var domain = (p.api_domain || '').toLowerCase();
+        return id.indexOf(query) >= 0 || domain.indexOf(query) >= 0;
+    });
+    _renderProxyTable(filtered);
 }
 
 /* ------------------------------------------------------------------ */
@@ -534,6 +592,146 @@ async function checkProxyHealth(id) {
         handleApiError(err);
         if (container) container.innerHTML = '<div class="empty-state"><p>Failed to check health.</p></div>';
     }
+}
+
+/* ------------------------------------------------------------------ */
+/*  State Viewer/Editor (Phase 2A)                                    */
+/* ------------------------------------------------------------------ */
+
+async function loadState() {
+    var id = document.getElementById('historyProxyId').value.trim();
+    if (!id) return;
+    var container = document.getElementById('stateContainer');
+    if (!container) return;
+    container.innerHTML = '<div class="loading-state"><span class="spinner"></span> Loading state...</div>';
+    try {
+        var data = await api('/proxy/state/' + encodeURIComponent(id) + '/', 'GET');
+        var state = data.state || {};
+        var isEmpty = Object.keys(state).length === 0;
+        var html = '<div class="inline-form" style="margin-bottom:12px;">';
+        html += '<button class="btn btn-blue btn-sm" onclick="editStateModal()">Edit</button>';
+        html += '<button class="btn btn-outline btn-sm" onclick="loadState()">Refresh</button>';
+        html += '<button class="btn btn-red btn-sm" onclick="clearStateConfirm()">Clear</button>';
+        html += '</div>';
+        if (isEmpty) {
+            html += '<div class="empty-state"><p>No state stored for this proxy. Use <code>_store</code> in a mock response to persist data.</p></div>';
+        } else {
+            html += '<pre style="background:var(--code-bg);color:var(--code-text);padding:12px;border-radius:var(--radius-sm);font-size:0.78rem;max-height:300px;overflow:auto;white-space:pre-wrap;word-break:break-word;">' + escapeHtml(JSON.stringify(state, null, 2)) + '</pre>';
+        }
+        container.innerHTML = html;
+    } catch (err) {
+        container.innerHTML = '<div class="empty-state"><p>Failed to load state.</p></div>';
+    }
+}
+
+function editStateModal() {
+    var id = document.getElementById('historyProxyId').value.trim();
+    if (!id) return;
+    var modal = document.getElementById('stateModal');
+    var body = document.getElementById('stateModalBody');
+    var header = modal.querySelector('.modal-header h3');
+    header.textContent = 'Edit State — ' + id;
+    var html = '<textarea id="stateEditArea" style="width:100%;min-height:200px;font-family:var(--mono);font-size:0.82rem;padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);resize:vertical;">Loading...</textarea>';
+    html += '<div style="margin-top:10px;display:flex;gap:8px;">';
+    html += '<button class="btn btn-blue btn-sm" onclick="_saveState(\'PUT\')">Replace (PUT)</button>';
+    html += '<button class="btn btn-outline btn-sm" onclick="_saveState(\'PATCH\')">Merge (PATCH)</button>';
+    html += '<button class="btn btn-outline btn-sm" onclick="_formatStateEdit()">Format</button>';
+    html += '</div>';
+    body.innerHTML = html;
+    modal.classList.add('visible');
+    // Load current state into textarea
+    api('/proxy/state/' + encodeURIComponent(id) + '/', 'GET').then(function(data) {
+        document.getElementById('stateEditArea').value = JSON.stringify(data.state || {}, null, 2);
+    });
+}
+
+function closeStateModal() {
+    document.getElementById('stateModal').classList.remove('visible');
+}
+
+function _formatStateEdit() {
+    var ta = document.getElementById('stateEditArea');
+    try { ta.value = JSON.stringify(JSON.parse(ta.value), null, 2); showToast('Formatted', 'success'); }
+    catch (e) { showToast('Invalid JSON', 'error'); }
+}
+
+async function _saveState(method) {
+    var id = document.getElementById('historyProxyId').value.trim();
+    var ta = document.getElementById('stateEditArea');
+    var data;
+    try { data = JSON.parse(ta.value); } catch (e) { showToast('Invalid JSON', 'error'); return; }
+    try {
+        await api('/proxy/state/' + encodeURIComponent(id) + '/', method, data);
+        showToast('State ' + (method === 'PUT' ? 'replaced' : 'merged'), 'success');
+        closeStateModal();
+        loadState();
+    } catch (err) { handleApiError(err); }
+}
+
+function clearStateConfirm() {
+    var id = document.getElementById('historyProxyId').value.trim();
+    if (!confirm('Clear all state for "' + id + '"? This cannot be undone.')) return;
+    api('/proxy/state/' + encodeURIComponent(id) + '/', 'DELETE').then(function() {
+        showToast('State cleared', 'success');
+        loadState();
+    }).catch(handleApiError);
+}
+
+/* ------------------------------------------------------------------ */
+/*  User Management (Phase 2B)                                        */
+/* ------------------------------------------------------------------ */
+
+async function loadUsers() {
+    var id = document.getElementById('historyProxyId').value.trim();
+    if (!id) return;
+    var container = document.getElementById('usersContainer');
+    if (!container) return;
+    container.innerHTML = '<div class="loading-state"><span class="spinner"></span> Loading users...</div>';
+    try {
+        var data = await api('/proxy/users/' + encodeURIComponent(id) + '/', 'GET');
+        var users = data.users || [];
+        var html = '<div class="inline-form" style="margin-bottom:12px;">';
+        html += '<input type="text" id="newUsername" placeholder="Username" style="width:140px;" />';
+        html += '<input type="password" id="newPassword" placeholder="Password" style="width:140px;" />';
+        html += '<button class="btn btn-blue btn-sm" onclick="addUser()">Add User</button>';
+        html += '</div>';
+        html += '<p style="font-size:0.75rem;color:var(--text-muted);margin-bottom:10px;">These are mock simulation credentials used by <code>verify_password()</code> in snippet expressions.</p>';
+        if (users.length === 0) {
+            html += '<div class="empty-state"><p>No users configured for this proxy.</p></div>';
+        } else {
+            html += '<table class="mock-table"><thead><tr><th>Username</th><th>Actions</th></tr></thead><tbody>';
+            users.forEach(function(u) {
+                html += '<tr><td><strong>' + escapeHtml(u.username) + '</strong></td>';
+                html += '<td><button class="btn btn-red btn-sm" onclick="deleteUser(\'' + escapeAttr(u.username) + '\')">Delete</button></td></tr>';
+            });
+            html += '</tbody></table>';
+        }
+        container.innerHTML = html;
+    } catch (err) {
+        container.innerHTML = '<div class="empty-state"><p>Failed to load users.</p></div>';
+    }
+}
+
+async function addUser() {
+    var id = document.getElementById('historyProxyId').value.trim();
+    var username = document.getElementById('newUsername').value.trim();
+    var password = document.getElementById('newPassword').value;
+    if (!username || !password) { showToast('Username and password required', 'error'); return; }
+    try {
+        await api('/proxy/users/' + encodeURIComponent(id) + '/', 'POST', { username: username, password: password });
+        showToast('User "' + username + '" added', 'success');
+        loadUsers();
+    } catch (err) { handleApiError(err); }
+}
+
+async function deleteUser(username) {
+    var id = document.getElementById('historyProxyId').value.trim();
+    if (!confirm('Delete user "' + username + '"?')) return;
+    try {
+        await api('/proxy/users/' + encodeURIComponent(id) + '/' + encodeURIComponent(username) + '/', 'DELETE');
+        showToast('User deleted', 'success');
+        loadUsers();
+    } catch (err) { handleApiError(err); }
 }
 
 /* ------------------------------------------------------------------ */

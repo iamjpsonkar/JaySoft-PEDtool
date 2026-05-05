@@ -94,6 +94,10 @@
 /* --- Clickable rows --- */
 .clickable-row { cursor: pointer; }
 .clickable-row:hover td { background: var(--primary-light) !important; }
+.proxy-row-selected td { background: var(--primary-light) !important; border-left: 3px solid var(--primary); }
+
+/* --- Table responsive wrapper --- */
+.table-responsive { overflow-x: auto; }
 
 /* --- Analytics stat cards --- */
 .stat-card {

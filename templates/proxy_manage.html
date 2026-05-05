@@ -38,6 +38,7 @@
             <div class="card-header">
                 <h2 class="icon-text"><span class="icon">&#9776;</span> Proxies</h2>
                 <div class="action-bar">
+                    <input type="text" id="proxySearchInput" placeholder="Search proxies..." oninput="filterProxyList()" style="width:180px;padding:5px 10px;font-size:0.82rem;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);" />
                     <button class="btn btn-blue btn-sm" onclick="loadProxyList()">Refresh</button>
                     <button class="btn btn-green btn-sm" onclick="exportAll()">Export All</button>
                     <button class="btn btn-outline btn-sm" onclick="toggleImportSection()">Import</button>
@@ -95,21 +96,13 @@
 
             <!-- Tab bar -->
             <div class="tab-bar">
-                <div class="tab-bar-item active" onclick="switchManageTab('history',this)">
-                    History
-                </div>
-                <div class="tab-bar-item" onclick="switchManageTab('snapshots',this)">
-                    Snapshots
-                </div>
-                <div class="tab-bar-item" onclick="switchManageTab('analytics',this)">
-                    Analytics
-                </div>
-                <div class="tab-bar-item" onclick="switchManageTab('health',this)">
-                    Health
-                </div>
-                <div class="tab-bar-item" onclick="switchManageTab('storage',this)">
-                    Storage
-                </div>
+                <div class="tab-bar-item active" data-tab="history" onclick="switchManageTab('history',this)">History</div>
+                <div class="tab-bar-item" data-tab="state" onclick="switchManageTab('state',this)">State</div>
+                <div class="tab-bar-item" data-tab="snapshots" onclick="switchManageTab('snapshots',this)">Snapshots</div>
+                <div class="tab-bar-item" data-tab="users" onclick="switchManageTab('users',this)">Users</div>
+                <div class="tab-bar-item" data-tab="analytics" onclick="switchManageTab('analytics',this)">Analytics</div>
+                <div class="tab-bar-item" data-tab="health" onclick="switchManageTab('health',this)">Health</div>
+                <div class="tab-bar-item" data-tab="storage" onclick="switchManageTab('storage',this)">Storage</div>
             </div>
 
             <!-- History Tab -->
@@ -119,12 +112,8 @@
                     <button class="btn btn-red btn-sm" onclick="clearHistory()">Clear</button>
                 </div>
 
-                <!-- History Filters -->
-                <div class="collapsible-header" onclick="this.classList.toggle('collapsed');document.getElementById('historyFilters').classList.toggle('collapsed')">
-                    <span class="chevron">&#9660;</span>
-                    <span style="font-size:0.78rem;font-weight:600;color:var(--text-secondary);">Filters</span>
-                </div>
-                <div id="historyFilters" class="collapsible-body">
+                <!-- History Filters (always visible) -->
+                <div id="historyFilters">
                     <div class="history-filters">
                         <div><label>Method</label>
                             <select id="historyFilterMethod">
@@ -159,6 +148,13 @@
                 </div>
             </div>
 
+            <!-- State Tab -->
+            <div class="tab-panel" id="tab-state">
+                <div id="stateContainer">
+                    <div class="empty-state"><p>Select a proxy from the list above to view its state.</p></div>
+                </div>
+            </div>
+
             <!-- Snapshots Tab -->
             <div class="tab-panel" id="tab-snapshots">
                 <div class="inline-form" style="margin-bottom:12px;">
@@ -167,6 +163,13 @@
                 </div>
                 <div id="snapshotsContainer">
                     <div class="empty-state"><p>Snapshots let you save and restore proxy state. Enter a proxy identifier above.</p></div>
+                </div>
+            </div>
+
+            <!-- Users Tab -->
+            <div class="tab-panel" id="tab-users">
+                <div id="usersContainer">
+                    <div class="empty-state"><p>Select a proxy to manage its mock simulation users.</p></div>
                 </div>
             </div>
 
@@ -209,6 +212,22 @@
 
         <div class="page-footer">
             PED Tools &mdash; Proxy, Mock &amp; JSON Workbench &mdash; Built by Jay Prakash Sonkar
+        </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- State Editor Modal                                               -->
+    <!-- ================================================================ -->
+    <div id="stateModal" class="modal-overlay" onclick="if(event.target===this)closeStateModal()">
+        <div class="modal" style="max-width:700px;">
+            <div class="modal-header">
+                <h3>Edit State</h3>
+                <button class="modal-close" onclick="closeStateModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="stateModalBody"></div>
+            <div class="modal-footer">
+                <button class="btn btn-outline btn-sm" onclick="closeStateModal()">Close</button>
+            </div>
         </div>
     </div>
 
