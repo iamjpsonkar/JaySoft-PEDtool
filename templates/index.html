@@ -63,8 +63,10 @@
                 <span class="icon-text"><span class="icon">&#9998;</span> Input</span>
                 <div class="pane-actions">
                     <button class="btn-sm" onclick="formatInput()" data-tooltip="Format JSON">Format</button>
-                    <button class="btn-sm" onclick="clearInput()">Clear</button>
+                    <button class="btn-sm" onclick="copyInput()">Copy</button>
                     <button class="btn-sm" onclick="pasteInput()">Paste</button>
+                    <button class="btn-sm" onclick="moveToOutput()">To Output &#8594;</button>
+                    <button class="btn-sm" onclick="clearInput()">Clear</button>
                 </div>
             </div>
             <textarea class="editor" id="inputEditor" placeholder="Paste JSON, encrypted data, or raw text here..." spellcheck="false"></textarea>

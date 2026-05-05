@@ -59,6 +59,17 @@ function formatInput() {
     }
 }
 
+function copyInput() {
+    if (!inputEl.value) { showToast('Nothing to copy', 'error'); return; }
+    navigator.clipboard.writeText(inputEl.value);
+    showToast('Copied to clipboard', 'success');
+}
+
+function moveToOutput() {
+    setOutput(inputEl.value);
+    showToast('Moved to output', 'success');
+}
+
 function clearInput() { inputEl.value = ''; updateInputStats(); }
 function clearOutput() { outputEl.value = ''; updateOutputStats(); showTextView(); }
 
