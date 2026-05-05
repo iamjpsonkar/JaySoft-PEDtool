@@ -148,9 +148,12 @@ body {
     border-bottom: 1px solid var(--nav-border);
     padding: 0 24px;
     height: 56px;
+    min-height: 56px;
+    max-height: 56px;
     display: flex;
     align-items: center;
     gap: 4px;
+    overflow: hidden;
     transition: background var(--transition), border-color var(--transition);
 }
 
@@ -188,6 +191,19 @@ body {
 
 /* Nav spacer pushes right items */
 .topbar .nav-spacer { flex: 1; }
+
+/* Author credit in topbar */
+.topbar-author {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--primary);
+    background: var(--primary-light);
+    padding: 3px 10px;
+    border-radius: var(--radius-full);
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+    margin-right: 6px;
+}
 
 /* Theme toggle in nav */
 .theme-toggle {
