@@ -53,8 +53,21 @@ function formatInput() {
         const parsed = JSON.parse(inputEl.value);
         inputEl.value = JSON.stringify(parsed, null, 2);
         updateInputStats();
+        // Auto-show tree if it's an object/array
+        _inputIsJson = false;
+        _inputTreeData = null;
+        if (parsed !== null && typeof parsed === 'object') {
+            _inputIsJson = true;
+            _inputTreeData = parsed;
+            _showInputTreeView(parsed);
+        } else {
+            showInputTextView();
+        }
         showToast('Formatted', 'success');
     } catch {
+        _inputIsJson = false;
+        _inputTreeData = null;
+        showInputTextView();
         showToast('Not valid JSON', 'error');
     }
 }
@@ -70,8 +83,65 @@ function moveToOutput() {
     showToast('Moved to output', 'success');
 }
 
-function clearInput() { inputEl.value = ''; updateInputStats(); }
+function clearInput() { inputEl.value = ''; updateInputStats(); showInputTextView(); }
 function clearOutput() { outputEl.value = ''; updateOutputStats(); showTextView(); }
+
+/* --- Input pane tree view --- */
+var _inputTreeData = null;
+var _isInputTreeActive = false;
+var _inputIsJson = false;
+
+function _showInputTreeView(data) {
+    _inputTreeData = data;
+    _isInputTreeActive = true;
+    _inputIsJson = true;
+    var tree = document.getElementById('inputTreeView');
+    _jtCounter = 0;
+    tree.innerHTML = _renderNode(data, null, false, 0);
+    tree.style.display = 'block';
+    inputEl.style.display = 'none';
+    document.getElementById('btnInputExpandAll').style.display = '';
+    document.getElementById('btnInputCollapseAll').style.display = '';
+    var toggle = document.getElementById('btnInputViewToggle');
+    toggle.style.display = '';
+    toggle.textContent = 'Text View';
+}
+
+function showInputTextView() {
+    _isInputTreeActive = false;
+    var tree = document.getElementById('inputTreeView');
+    tree.style.display = 'none';
+    inputEl.style.display = '';
+    document.getElementById('btnInputExpandAll').style.display = 'none';
+    document.getElementById('btnInputCollapseAll').style.display = 'none';
+    var toggle = document.getElementById('btnInputViewToggle');
+    if (_inputIsJson) {
+        toggle.style.display = '';
+        toggle.textContent = 'Object View';
+    } else {
+        toggle.style.display = 'none';
+    }
+}
+
+function toggleInputView() {
+    if (_isInputTreeActive) {
+        showInputTextView();
+    } else if (_inputIsJson && _inputTreeData) {
+        _showInputTreeView(_inputTreeData);
+    }
+}
+
+function inputTreeExpandAll() {
+    document.querySelectorAll('#inputTreeView .jt-children.collapsed').forEach(function(el) { el.classList.remove('collapsed'); });
+    document.querySelectorAll('#inputTreeView .jt-toggle.collapsed').forEach(function(el) { el.classList.remove('collapsed'); });
+    document.querySelectorAll('#inputTreeView .jt-summary').forEach(function(el) { el.style.display = 'none'; });
+}
+
+function inputTreeCollapseAll() {
+    document.querySelectorAll('#inputTreeView .jt-children').forEach(function(el) { el.classList.add('collapsed'); });
+    document.querySelectorAll('#inputTreeView .jt-toggle').forEach(function(el) { el.classList.add('collapsed'); });
+    document.querySelectorAll('#inputTreeView .jt-summary').forEach(function(el) { el.style.display = ''; });
+}
 
 function formatOutput() {
     try {
@@ -101,6 +171,17 @@ async function pasteInput() {
         const text = await navigator.clipboard.readText();
         inputEl.value = text;
         updateInputStats();
+        // Auto-detect JSON for tree view
+        _inputIsJson = false;
+        _inputTreeData = null;
+        try {
+            var parsed = JSON.parse(text);
+            if (parsed !== null && typeof parsed === 'object') {
+                _inputIsJson = true;
+                _inputTreeData = parsed;
+                _showInputTreeView(parsed);
+            }
+        } catch (e) { showInputTextView(); }
         showToast('Pasted from clipboard', 'success');
     } catch {
         showToast('Clipboard access denied', 'error');
