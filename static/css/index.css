@@ -238,6 +238,65 @@ textarea.editor:focus {
     padding: 1px 4px;
 }
 
+/* --- Inline Diff View (git-style) --- */
+.diff-inline-view {
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    line-height: 1.8;
+    padding: 8px 0;
+}
+.diff-header {
+    padding: 6px 12px;
+    margin-bottom: 8px;
+    font-family: var(--font);
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+}
+.diff-identical { color: var(--success); font-weight: 600; }
+.diff-line {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 2px 12px;
+    border-radius: 2px;
+}
+.diff-line-added {
+    background: rgba(16, 185, 129, 0.1);
+    color: #059669;
+}
+.diff-line-removed {
+    background: rgba(239, 68, 68, 0.1);
+    color: #dc2626;
+}
+[data-theme="dark"] .diff-line-added {
+    background: rgba(52, 211, 153, 0.1);
+    color: #34d399;
+}
+[data-theme="dark"] .diff-line-removed {
+    background: rgba(248, 113, 113, 0.1);
+    color: #f87171;
+}
+.diff-sign {
+    font-weight: 700;
+    width: 14px;
+    flex-shrink: 0;
+    font-size: 0.9rem;
+}
+.diff-path-label {
+    font-weight: 600;
+    min-width: 100px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+.diff-line-added .diff-path-label { color: #059669; }
+.diff-line-removed .diff-path-label { color: #dc2626; }
+[data-theme="dark"] .diff-line-added .diff-path-label { color: #34d399; }
+[data-theme="dark"] .diff-line-removed .diff-path-label { color: #f87171; }
+.diff-val {
+    word-break: break-all;
+}
+
 /* --- JSON Tree Viewer --- */
 .json-tree-container {
     flex: 1;

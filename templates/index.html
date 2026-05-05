@@ -79,10 +79,10 @@
         <!-- Resize handle -->
         <div class="resize-handle" id="resizeHandle" title="Drag to resize"></div>
 
-        <!-- Output pane -->
+        <!-- Workspace pane (editable — keeps user content, used for Diff B-side) -->
         <div class="editor-pane" id="outputPane">
             <div class="pane-header">
-                <span class="icon-text"><span class="icon">&#10004;</span> Output</span>
+                <span class="icon-text"><span class="icon">&#128221;</span> Workspace</span>
                 <div class="pane-actions">
                     <button class="btn-sm" id="btnExpandAll" onclick="treeExpandAll()" style="display:none;">Expand All</button>
                     <button class="btn-sm" id="btnCollapseAll" onclick="treeCollapseAll()" style="display:none;">Collapse All</button>
@@ -94,7 +94,7 @@
                     <button class="btn-sm" onclick="clearOutput()">Clear</button>
                 </div>
             </div>
-            <textarea class="editor" id="outputEditor" placeholder="Results appear here — also paste second JSON here for Diff" spellcheck="false"></textarea>
+            <textarea class="editor" id="outputEditor" placeholder="Paste JSON here for Diff, or use as scratchpad..." spellcheck="false"></textarea>
             <div class="json-tree-container" id="jsonTreeView" style="display:none;"></div>
         </div>
     </div>
@@ -103,7 +103,7 @@
         <span id="inputStatus">Input: 0 chars</span>
         <span id="inputLines">0 lines</span>
         <span class="statusbar-sep">|</span>
-        <span id="outputStatus">Output: 0 chars</span>
+        <span id="outputStatus">Workspace: 0 chars</span>
         <span id="outputLines">0 lines</span>
         <span class="statusbar-spacer"></span>
         <span class="statusbar-author">Built by Jay Prakash Sonkar</span>

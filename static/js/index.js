@@ -14,7 +14,7 @@ function updateInputStats() {
 
 function updateOutputStats() {
     var val = outputEl.value;
-    document.getElementById('outputStatus').textContent = 'Output: ' + val.length + ' chars';
+    document.getElementById('outputStatus').textContent = 'Workspace: ' + val.length + ' chars';
     document.getElementById('outputLines').textContent = (val ? val.split('\n').length : 0) + ' lines';
 }
 
@@ -534,7 +534,7 @@ async function jsonDiffTool() {
 
     var second = outputEl.value.trim();
     if (!second) {
-        showToast('Paste second JSON in the Output pane, then click Diff again', 'error');
+        showToast('Paste second JSON in the Workspace pane, then click Diff again', 'error');
         showTextView();
         outputEl.focus();
         return;
@@ -543,29 +543,71 @@ async function jsonDiffTool() {
     try {
         const res = await post('/ped/diff', { a: input, b: second });
         if (res.error) {
-            setOutput('Error: ' + res.error);
-            showToast('Diff failed', 'error');
-        } else {
-            let text = '=== JSON DIFF ===\n';
-            text += 'Identical: ' + res.identical + '\n';
-            text += 'Changes: ' + res.change_count + '\n\n';
-            if (res.changes && res.changes.length > 0) {
-                res.changes.forEach(c => {
-                    if (c.type === 'added') {
-                        text += '+ ' + c.path + ': ' + JSON.stringify(c.new) + '\n';
-                    } else if (c.type === 'removed') {
-                        text += '- ' + c.path + ': ' + JSON.stringify(c.old) + '\n';
-                    } else {
-                        text += '~ ' + c.path + ': ' + JSON.stringify(c.old) + ' -> ' + JSON.stringify(c.new) + '\n';
-                    }
-                });
-            } else {
-                text += 'No differences found.\n';
-            }
-            setOutput(text);
-            showToast(res.identical ? 'Documents are identical' : res.change_count + ' change(s) found', 'success');
+            showToast('Diff failed: ' + res.error, 'error');
+            return;
         }
+        // Render inline colored diff in the input pane's tree view area
+        // (keeps workspace content untouched)
+        _renderInlineDiff(res);
+        showToast(res.identical ? 'Documents are identical' : res.change_count + ' change(s) found',
+                  res.identical ? 'success' : 'success');
     } catch (e) { showToast('Request failed', 'error'); }
+}
+
+function _renderInlineDiff(res) {
+    var tree = document.getElementById('inputTreeView');
+    var html = '<div class="diff-inline-view">';
+    html += '<div class="diff-header">';
+    html += '<strong>Diff</strong> &mdash; ';
+    if (res.identical) {
+        html += '<span class="diff-identical">Identical (no changes)</span>';
+    } else {
+        html += '<span>' + res.change_count + ' change(s)</span>';
+    }
+    html += '</div>';
+
+    if (res.changes && res.changes.length > 0) {
+        res.changes.forEach(function(c) {
+            if (c.type === 'removed') {
+                html += '<div class="diff-line diff-line-removed">';
+                html += '<span class="diff-sign">-</span>';
+                html += '<span class="diff-path-label">' + _esc(c.path) + '</span>';
+                html += '<span class="diff-val">' + _esc(JSON.stringify(c.old)) + '</span>';
+                html += '</div>';
+            } else if (c.type === 'added') {
+                html += '<div class="diff-line diff-line-added">';
+                html += '<span class="diff-sign">+</span>';
+                html += '<span class="diff-path-label">' + _esc(c.path) + '</span>';
+                html += '<span class="diff-val">' + _esc(JSON.stringify(c.new)) + '</span>';
+                html += '</div>';
+            } else {
+                // changed — show old (red) then new (green)
+                html += '<div class="diff-line diff-line-removed">';
+                html += '<span class="diff-sign">-</span>';
+                html += '<span class="diff-path-label">' + _esc(c.path) + '</span>';
+                html += '<span class="diff-val">' + _esc(JSON.stringify(c.old)) + '</span>';
+                html += '</div>';
+                html += '<div class="diff-line diff-line-added">';
+                html += '<span class="diff-sign">+</span>';
+                html += '<span class="diff-path-label">' + _esc(c.path) + '</span>';
+                html += '<span class="diff-val">' + _esc(JSON.stringify(c.new)) + '</span>';
+                html += '</div>';
+            }
+        });
+    }
+    html += '</div>';
+
+    tree.innerHTML = html;
+    tree.style.display = 'block';
+    inputEl.style.display = 'none';
+    // Show text view button to go back
+    _isInputTreeActive = true;
+    _inputIsJson = true;
+    document.getElementById('btnInputExpandAll').style.display = 'none';
+    document.getElementById('btnInputCollapseAll').style.display = 'none';
+    var toggle = document.getElementById('btnInputViewToggle');
+    toggle.style.display = '';
+    toggle.textContent = 'Text View';
 }
 
 /* --- JSON Schema Validate --- */
