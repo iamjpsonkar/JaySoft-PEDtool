@@ -1008,18 +1008,6 @@ document.addEventListener('click', function(e) {
     }
 });
 
-function showAesAndEncrypt() {
-    document.getElementById('aesInputs').style.display = 'flex';
-    var iv = document.getElementById('encIv').value.trim();
-    var secret = document.getElementById('secret').value.trim();
-    if (iv && secret) { encryptData(); } else { document.getElementById('encIv').focus(); }
-}
-function showAesAndDecrypt() {
-    document.getElementById('aesInputs').style.display = 'flex';
-    var iv = document.getElementById('encIv').value.trim();
-    var secret = document.getElementById('secret').value.trim();
-    if (iv && secret) { decryptData(); } else { document.getElementById('encIv').focus(); }
-}
 
 /* --- Suggestion Box --- */
 function toggleSuggestionBox() {

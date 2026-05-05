@@ -74,8 +74,6 @@ body { display: flex; flex-direction: column; }
 }
 .toolbar-dropdown-check input { margin: 0; accent-color: var(--primary); }
 
-/* AES inputs group */
-.toolbar-aes input { width: 110px; }
 
 .toolbar label {
     font-size: 0.78rem;
