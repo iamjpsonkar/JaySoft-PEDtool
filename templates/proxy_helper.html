@@ -10,11 +10,13 @@
 </head>
 <body>
     <div class="topbar">
-        <h1>API Documentation</h1>
-        <a href="/proxy/">Mock Builder</a>
+        <h1>PED Tools</h1>
         <a href="/">Home</a>
+        <a href="/proxy/">Mock Builder</a>
+        <a href="/proxy/helper" class="active">Docs</a>
         {% if session.get('authenticated') %}
         <a href="/proxy/manage/">Manage</a>
+        <a href="/suggestions/view/">Suggestions</a>
         {% endif %}
         <span class="nav-spacer"></span>
         <span class="topbar-author">by Jay Prakash Sonkar</span>

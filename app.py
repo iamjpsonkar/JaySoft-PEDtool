@@ -4292,6 +4292,14 @@ def submit_suggestion():
     name = (data.get("name") or "Anonymous").strip()[:100]
 
     db = _get_db()
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS suggestions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL DEFAULT 'Anonymous',
+            message TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
     db.execute(
         "INSERT INTO suggestions (name, message) VALUES (?, ?)",
         (name, message),
@@ -4307,6 +4315,15 @@ def submit_suggestion():
 def list_suggestions():
     """List all suggestions (auth required)."""
     db = _get_db()
+    # Ensure table exists (in case migration hasn't run)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS suggestions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL DEFAULT 'Anonymous',
+            message TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
     rows = db.execute(
         "SELECT id, name, message, created_at FROM suggestions ORDER BY id DESC"
     ).fetchall()

@@ -11,18 +11,19 @@
 </head>
 <body>
     <div class="topbar">
-        <h1>PED Tools <span class="page-subtitle">JSON &amp; Encryption Workbench</span></h1>
+        <h1>PED Tools</h1>
         <a href="/" class="active">Home</a>
-        <a href="/proxy/">Proxy Server</a>
+        <a href="/proxy/">Mock Builder</a>
         <a href="/proxy/helper">Docs</a>
         {% if session.get('authenticated') %}
         <a href="/proxy/manage/">Manage</a>
+        <a href="/suggestions/view/">Suggestions</a>
         {% endif %}
         <span class="nav-spacer"></span>
         <span class="topbar-author">by Jay Prakash Sonkar</span>
         <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
         {% if session.get('authenticated') %}
-        <a href="/logout" style="opacity:0.8;">Logout</a>
+        <a href="/logout">Logout</a>
         {% else %}
         <a href="/login">Login</a>
         {% endif %}
