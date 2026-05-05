@@ -2430,7 +2430,12 @@ def _check_conditions(
         elif source_type == "method":
             actual = method
         else:
-            actual = json_body.get(field)
+            # Support dotted paths for nested JSON body fields (e.g. giftcard.cardNumber)
+            if "." in field:
+                resolved, found = _resolve_item_path(json_body, field)
+                actual = resolved if found else None
+            else:
+                actual = json_body.get(field)
 
         if operator == "eq" and str(actual) != str(expected):
             return False
