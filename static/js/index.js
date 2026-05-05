@@ -166,17 +166,32 @@ function jsonView() {
         }
     }
 
-    // Attempt 2: try common fixes (single quotes, trailing commas, unquoted keys)
+    // Attempt 2: try common fixes in multiple passes
     if (found === 0) {
-        var fixed = raw
-            .replace(/'/g, '"')                           // single quotes
-            .replace(/,\s*([\]}])/g, '$1')                // trailing commas
-            .replace(/(\{|,)\s*(\w+)\s*:/g, '$1"$2":');  // unquoted keys
+        var fixed = raw;
+        // Pass 1: single quotes to double
+        fixed = fixed.replace(/'/g, '"');
+        // Pass 2: trailing commas before } or ]
+        fixed = fixed.replace(/,\s*([\]}])/g, '$1');
+        // Pass 3: unquoted keys  e.g.  {name: "val"}  or  , name: "val"
+        fixed = fixed.replace(/([{,])\s*(\w+)\s*:/g, '$1"$2":');
+        // Pass 4: Python literals  True/False/None -> true/false/null
+        fixed = fixed.replace(/\bTrue\b/g, 'true').replace(/\bFalse\b/g, 'false').replace(/\bNone\b/g, 'null');
+        // Pass 5: missing colon between "key" and value  e.g.  {"hi" true}
+        //   Matches: "..." <whitespace> <not-colon-or-comma-or-bracket>
+        fixed = fixed.replace(/(")\s+(?=["\d{\[tfn-])/g, '$1: ');
+        // Pass 6: unquoted keys without colons  e.g. {key1 null}
+        fixed = fixed.replace(/([{,])\s*([a-zA-Z_]\w*)\s+(?=["\d{\[tfn-])/g, '$1"$2": ');
+        // Pass 7: unquoted string values after colon  e.g. {"key": hello}
+        fixed = fixed.replace(/:\s*([a-zA-Z_]\w*)(\s*[,}\]])/g, function(m, val, after) {
+            if (/^(true|false|null)$/.test(val)) return m;
+            return ': "' + val + '"' + after;
+        });
         try {
             var obj2 = JSON.parse(fixed);
             result = JSON.stringify(obj2, null, 2);
             found = 1;
-            errors.push('Note: Input was not valid JSON but was auto-corrected');
+            errors = ['Note: Input was not valid JSON but was auto-corrected'];
         } catch (e3) {
             errors.push('Auto-correction also failed: ' + e3.message);
         }
