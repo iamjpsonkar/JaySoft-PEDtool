@@ -60,7 +60,30 @@ function formatInput() {
 }
 
 function clearInput() { inputEl.value = ''; updateInputStats(); }
-function clearOutput() { setOutput(''); showTextView(); }
+function clearOutput() { outputEl.value = ''; updateOutputStats(); showTextView(); }
+
+function formatOutput() {
+    try {
+        const parsed = JSON.parse(outputEl.value);
+        outputEl.value = JSON.stringify(parsed, null, 2);
+        updateOutputStats();
+        showToast('Formatted', 'success');
+    } catch {
+        showToast('Not valid JSON', 'error');
+    }
+}
+
+async function pasteOutput() {
+    try {
+        const text = await navigator.clipboard.readText();
+        outputEl.value = text;
+        updateOutputStats();
+        showTextView();
+        showToast('Pasted from clipboard', 'success');
+    } catch {
+        showToast('Clipboard access denied', 'error');
+    }
+}
 
 async function pasteInput() {
     try {
