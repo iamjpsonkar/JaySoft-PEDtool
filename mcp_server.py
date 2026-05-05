@@ -195,6 +195,22 @@ MCP_TOOLS = [
         "description": "Get database storage usage info (size, row counts).",
         "inputSchema": {"type": "object", "properties": {}, "required": []},
     },
+    {
+        "name": "get_curl",
+        "description": "Generate the correct curl command to call a proxy mock endpoint. Use this when the user asks for a curl command to test a mock.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "proxy_identifier": {"type": "string", "description": "The proxy identifier"},
+                "endpoint": {"type": "string", "description": "The endpoint path (e.g. /ajiocash/v1/giftcard/getBalance)"},
+                "method": {"type": "string", "description": "HTTP method", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]},
+                "body": {"description": "Request body JSON (for POST/PUT/PATCH)"},
+                "headers": {"type": "object", "description": "Custom headers to include"},
+                "base_url": {"type": "string", "description": "Base URL of the PED Tools server (default: https://jsonkar.pythonanywhere.com)"},
+            },
+            "required": ["proxy_identifier", "endpoint", "method"],
+        },
+    },
 ]
 
 
@@ -370,6 +386,27 @@ def _execute_tool(name: str, arguments: dict) -> dict:
                 "mock_count": db.execute("SELECT COUNT(*) as c FROM mocks").fetchone()["c"],
                 "proxy_count": db.execute("SELECT COUNT(*) as c FROM proxies").fetchone()["c"],
             }
+
+    if name == "get_curl":
+        base = arguments.get("base_url", "https://jsonkar.pythonanywhere.com").rstrip("/")
+        ep = arguments["endpoint"]
+        if ep.startswith("/"):
+            ep = ep[1:]
+        url = f"{base}/proxy/{arguments['proxy_identifier']}/{ep}"
+        method = arguments["method"]
+        parts = [f'curl -X {method} "{url}"']
+        # Headers
+        hdrs = arguments.get("headers", {})
+        hdrs.setdefault("Content-Type", "application/json")
+        for k, v in hdrs.items():
+            parts.append(f'  -H "{k}: {v}"')
+        # Body
+        body = arguments.get("body")
+        if body and method in ("POST", "PUT", "PATCH"):
+            body_str = json.dumps(body, indent=2) if isinstance(body, (dict, list)) else str(body)
+            parts.append(f"  -d '{body_str}'")
+        curl_cmd = " \\\n".join(parts)
+        return {"curl": curl_cmd, "note": "This calls the proxy endpoint, which returns the mock response."}
 
     return {"error": f"Unknown tool: {name}"}
 
@@ -559,9 +596,16 @@ def mcp_info():
         "name": SERVER_INFO["name"],
         "version": SERVER_INFO["version"],
         "protocol": "MCP over SSE",
+        "note": "This is an MCP server for AI assistants. To create mocks via curl, use POST /proxy/mock/create/. To call mocks, use ANY /proxy/<identifier>/<endpoint>.",
         "endpoints": {
             "sse": "/mcp/sse",
             "messages": "/mcp/messages?session_id=<id>",
+        },
+        "rest_api": {
+            "create_mock": "POST /proxy/mock/create/",
+            "call_mock": "ANY /proxy/<identifier>/<endpoint>",
+            "list_proxies": "GET /proxy/list/",
+            "docs": "GET /proxy/helper",
         },
         "tools": [{"name": t["name"], "description": t["description"]} for t in MCP_TOOLS],
         "tool_count": len(MCP_TOOLS),
