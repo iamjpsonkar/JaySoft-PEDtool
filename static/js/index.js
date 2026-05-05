@@ -25,13 +25,15 @@ function setOutput(text) {
     updateOutputStats();
     // Auto-detect: if output is valid JSON object/array, show tree view;
     // otherwise show text view (encrypt/decrypt/errors/plain text)
+    _outputIsJson = false;
+    _treeViewData = null;
     try {
         var parsed = JSON.parse(text);
         if (parsed !== null && typeof parsed === 'object') {
             _showTreeView(parsed);
             return;
         }
-    } catch (e) { /* not JSON — fall through to text view */ }
+    } catch (e) { /* not JSON */ }
     showTextView();
 }
 
@@ -213,26 +215,50 @@ function jsonView() {
 /* --- Tree view rendering --- */
 var _treeViewData = null;
 
+var _isTreeViewActive = false;
+var _outputIsJson = false;
+
 function _showTreeView(data) {
     _treeViewData = data;
+    _isTreeViewActive = true;
+    _outputIsJson = true;
     var tree = document.getElementById('jsonTreeView');
     var editor = document.getElementById('outputEditor');
+    _jtCounter = 0;
     tree.innerHTML = _renderNode(data, null, false, 0);
     tree.style.display = 'block';
     editor.style.display = 'none';
     document.getElementById('btnExpandAll').style.display = '';
     document.getElementById('btnCollapseAll').style.display = '';
-    document.getElementById('btnTextView').style.display = '';
+    var toggle = document.getElementById('btnViewToggle');
+    toggle.style.display = '';
+    toggle.textContent = 'Text View';
 }
 
 function showTextView() {
+    _isTreeViewActive = false;
     var tree = document.getElementById('jsonTreeView');
     var editor = document.getElementById('outputEditor');
     tree.style.display = 'none';
     editor.style.display = '';
     document.getElementById('btnExpandAll').style.display = 'none';
     document.getElementById('btnCollapseAll').style.display = 'none';
-    document.getElementById('btnTextView').style.display = 'none';
+    var toggle = document.getElementById('btnViewToggle');
+    if (_outputIsJson) {
+        // Output is JSON — keep the button visible so user can switch back to tree
+        toggle.style.display = '';
+        toggle.textContent = 'Object View';
+    } else {
+        toggle.style.display = 'none';
+    }
+}
+
+function toggleOutputView() {
+    if (_isTreeViewActive) {
+        showTextView();
+    } else if (_outputIsJson && _treeViewData) {
+        _showTreeView(_treeViewData);
+    }
 }
 
 function _renderNode(val, key, isLast, depth) {
