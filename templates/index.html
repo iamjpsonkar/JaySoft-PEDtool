@@ -61,7 +61,7 @@
         <!-- Input pane -->
         <div class="editor-pane" id="inputPane">
             <div class="pane-header">
-                <span class="icon-text"><span class="icon">&#9998;</span> Input</span>
+                <span class="icon-text"><span class="icon">&#9998;</span> Panel A</span>
                 <div class="pane-actions">
                     <button class="btn-sm" id="btnInputExpandAll" onclick="inputTreeExpandAll()" style="display:none;">Expand All</button>
                     <button class="btn-sm" id="btnInputCollapseAll" onclick="inputTreeCollapseAll()" style="display:none;">Collapse All</button>
@@ -69,11 +69,11 @@
                     <button class="btn-sm" onclick="formatInput()" data-tooltip="Format JSON">Format</button>
                     <button class="btn-sm" onclick="copyInput()">Copy</button>
                     <button class="btn-sm" onclick="pasteInput()">Paste</button>
-                    <button class="btn-sm" onclick="moveToOutput()">To Output &#8594;</button>
+                    <button class="btn-sm" onclick="moveToOutput()">To B &#8594;</button>
                     <button class="btn-sm" onclick="clearInput()">Clear</button>
                 </div>
             </div>
-            <textarea class="editor" id="inputEditor" placeholder="Paste JSON, encrypted data, or raw text here..." spellcheck="false"></textarea>
+            <textarea class="editor" id="inputEditor" placeholder="Paste JSON, encrypted data, or raw text here. Operations run on this pane." spellcheck="false"></textarea>
             <div class="json-tree-container" id="inputTreeView" style="display:none;"></div>
         </div>
 
@@ -83,7 +83,7 @@
         <!-- Workspace pane (editable — keeps user content, used for Diff B-side) -->
         <div class="editor-pane" id="outputPane">
             <div class="pane-header">
-                <span class="icon-text"><span class="icon">&#128221;</span> Workspace</span>
+                <span class="icon-text"><span class="icon">&#128221;</span> Panel B</span>
                 <div class="pane-actions">
                     <button class="btn-sm" id="btnExpandAll" onclick="treeExpandAll()" style="display:none;">Expand All</button>
                     <button class="btn-sm" id="btnCollapseAll" onclick="treeCollapseAll()" style="display:none;">Collapse All</button>
@@ -91,20 +91,20 @@
                     <button class="btn-sm" onclick="formatOutput()" data-tooltip="Format JSON">Format</button>
                     <button class="btn-sm" onclick="copyOutput()">Copy</button>
                     <button class="btn-sm" onclick="pasteOutput()">Paste</button>
-                    <button class="btn-sm" onclick="moveToInput()">&#8592; To Input</button>
+                    <button class="btn-sm" onclick="moveToInput()">&#8592; To A</button>
                     <button class="btn-sm" onclick="clearOutput()">Clear</button>
                 </div>
             </div>
-            <textarea class="editor" id="outputEditor" placeholder="Paste JSON here for Diff, or use as scratchpad..." spellcheck="false"></textarea>
+            <textarea class="editor" id="outputEditor" placeholder="Results appear here. Also use for Diff (A vs B) or as scratchpad. Your edits are never overwritten." spellcheck="false"></textarea>
             <div class="json-tree-container" id="jsonTreeView" style="display:none;"></div>
         </div>
     </div>
 
     <div class="statusbar">
-        <span id="inputStatus">Input: 0 chars</span>
+        <span id="inputStatus">A: 0 chars</span>
         <span id="inputLines">0 lines</span>
         <span class="statusbar-sep">|</span>
-        <span id="outputStatus">Workspace: 0 chars</span>
+        <span id="outputStatus">B: 0 chars</span>
         <span id="outputLines">0 lines</span>
         <span class="statusbar-spacer"></span>
         <span class="statusbar-author">Built by Jay Prakash Sonkar</span>
@@ -113,6 +113,20 @@
             <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd> Encrypt &nbsp;
             <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> Decrypt
         </span>
+    </div>
+
+    <!-- Diff Modal -->
+    <div id="diffModal" class="modal-overlay" onclick="if(event.target===this)closeDiffModal()">
+        <div class="modal" style="max-width:800px;">
+            <div class="modal-header">
+                <h3>JSON Diff — Panel A vs Panel B</h3>
+                <button class="modal-close" onclick="closeDiffModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="diffModalBody"></div>
+            <div class="modal-footer">
+                <button class="btn btn-outline btn-sm" onclick="closeDiffModal()">Close</button>
+            </div>
+        </div>
     </div>
 
     <div id="toast" class="toast"></div>

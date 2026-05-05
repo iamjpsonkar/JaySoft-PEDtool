@@ -8,19 +8,27 @@ const outputEl = document.getElementById('outputEditor');
 /* --- Status bar updates --- */
 function updateInputStats() {
     var val = inputEl.value;
-    document.getElementById('inputStatus').textContent = 'Input: ' + val.length + ' chars';
+    document.getElementById('inputStatus').textContent = 'A: ' + val.length + ' chars';
     document.getElementById('inputLines').textContent = (val ? val.split('\n').length : 0) + ' lines';
 }
 
 function updateOutputStats() {
     var val = outputEl.value;
-    document.getElementById('outputStatus').textContent = 'Workspace: ' + val.length + ' chars';
+    document.getElementById('outputStatus').textContent = 'B: ' + val.length + ' chars';
     document.getElementById('outputLines').textContent = (val ? val.split('\n').length : 0) + ' lines';
 }
 
 inputEl.addEventListener('input', updateInputStats);
 
+var _workspaceUserEdited = false;
+
 function setOutput(text) {
+    // If user has manually edited the workspace, don't overwrite — show in result modal instead
+    if (_workspaceUserEdited && outputEl.value.trim()) {
+        _showResultModal(text);
+        return;
+    }
+    _workspaceUserEdited = false;
     outputEl.value = text;
     updateOutputStats();
     // Auto-detect: if output is valid JSON object/array, show tree view;
@@ -35,6 +43,42 @@ function setOutput(text) {
         }
     } catch (e) { /* not JSON */ }
     showTextView();
+}
+
+function _showResultModal(text) {
+    var modal = document.getElementById('diffModal');
+    var body = document.getElementById('diffModalBody');
+    var header = modal.querySelector('.modal-header h3');
+    header.textContent = 'Result';
+    var html = '<pre style="background:var(--code-bg);color:var(--code-text);padding:16px;border-radius:var(--radius);font-family:var(--mono);font-size:0.82rem;white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow:auto;margin:0;">';
+    html += _esc(text);
+    html += '</pre>';
+    html += '<div style="margin-top:10px;display:flex;gap:8px;">';
+    html += '<button class="btn btn-blue btn-sm" onclick="navigator.clipboard.writeText(document.getElementById(\'diffModalBody\').querySelector(\'pre\').textContent);showToast(\'Copied\',\'success\')">Copy</button>';
+    html += '<button class="btn btn-outline btn-sm" onclick="_moveResultToWorkspace()">Move to Panel B</button>';
+    html += '</div>';
+    body.innerHTML = html;
+    modal.classList.add('visible');
+}
+
+function _moveResultToWorkspace() {
+    var pre = document.getElementById('diffModalBody').querySelector('pre');
+    if (pre) {
+        _workspaceUserEdited = false;
+        outputEl.value = pre.textContent;
+        updateOutputStats();
+        // Auto-detect tree view
+        _outputIsJson = false;
+        _treeViewData = null;
+        try {
+            var parsed = JSON.parse(pre.textContent);
+            if (parsed !== null && typeof parsed === 'object') {
+                _showTreeView(parsed);
+            } else { showTextView(); }
+        } catch(e) { showTextView(); }
+    }
+    closeDiffModal();
+    showToast('Moved to Panel B', 'success');
 }
 
 /* --- API helper --- */
@@ -79,12 +123,15 @@ function copyInput() {
 }
 
 function moveToOutput() {
-    setOutput(inputEl.value);
-    showToast('Moved to output', 'success');
+    _workspaceUserEdited = false;
+    outputEl.value = inputEl.value;
+    updateOutputStats();
+    showTextView();
+    showToast('Moved to Panel B', 'success');
 }
 
 function clearInput() { inputEl.value = ''; updateInputStats(); showInputTextView(); }
-function clearOutput() { outputEl.value = ''; updateOutputStats(); showTextView(); }
+function clearOutput() { outputEl.value = ''; _workspaceUserEdited = false; updateOutputStats(); showTextView(); }
 
 /* --- Input pane tree view --- */
 var _inputTreeData = null;
@@ -197,7 +244,8 @@ function copyOutput() {
 function moveToInput() {
     inputEl.value = outputEl.value;
     updateInputStats();
-    showToast('Moved to input', 'success');
+    showInputTextView();
+    showToast('Moved to Panel A', 'success');
 }
 
 /* --- Prettify --- */
@@ -534,8 +582,7 @@ async function jsonDiffTool() {
 
     var second = outputEl.value.trim();
     if (!second) {
-        showToast('Paste second JSON in the Workspace pane, then click Diff again', 'error');
-        showTextView();
+        showToast('Paste second JSON in Panel B, then click Diff again', 'error');
         outputEl.focus();
         return;
     }
@@ -546,27 +593,25 @@ async function jsonDiffTool() {
             showToast('Diff failed: ' + res.error, 'error');
             return;
         }
-        // Render inline colored diff in the input pane's tree view area
-        // (keeps workspace content untouched)
-        _renderInlineDiff(res);
+        // Show diff in a popup modal — both panes stay untouched
+        _showDiffModal(res);
         showToast(res.identical ? 'Documents are identical' : res.change_count + ' change(s) found',
                   res.identical ? 'success' : 'success');
     } catch (e) { showToast('Request failed', 'error'); }
 }
 
-function _renderInlineDiff(res) {
-    var tree = document.getElementById('inputTreeView');
-    var html = '<div class="diff-inline-view">';
-    html += '<div class="diff-header">';
-    html += '<strong>Diff</strong> &mdash; ';
-    if (res.identical) {
-        html += '<span class="diff-identical">Identical (no changes)</span>';
-    } else {
-        html += '<span>' + res.change_count + ' change(s)</span>';
-    }
-    html += '</div>';
+function _showDiffModal(res) {
+    var modal = document.getElementById('diffModal');
+    var body = document.getElementById('diffModalBody');
 
-    if (res.changes && res.changes.length > 0) {
+    var html = '';
+    if (res.identical) {
+        html += '<div class="diff-identical" style="padding:20px;text-align:center;font-size:1rem;">No differences — documents are identical</div>';
+    } else {
+        html += '<div class="diff-inline-view">';
+        html += '<div class="diff-header">';
+        html += '<strong>' + res.change_count + ' change(s)</strong> between Panel A and Panel B';
+        html += '</div>';
         res.changes.forEach(function(c) {
             if (c.type === 'removed') {
                 html += '<div class="diff-line diff-line-removed">';
@@ -581,7 +626,6 @@ function _renderInlineDiff(res) {
                 html += '<span class="diff-val">' + _esc(JSON.stringify(c.new)) + '</span>';
                 html += '</div>';
             } else {
-                // changed — show old (red) then new (green)
                 html += '<div class="diff-line diff-line-removed">';
                 html += '<span class="diff-sign">-</span>';
                 html += '<span class="diff-path-label">' + _esc(c.path) + '</span>';
@@ -594,20 +638,15 @@ function _renderInlineDiff(res) {
                 html += '</div>';
             }
         });
+        html += '</div>';
     }
-    html += '</div>';
 
-    tree.innerHTML = html;
-    tree.style.display = 'block';
-    inputEl.style.display = 'none';
-    // Show text view button to go back
-    _isInputTreeActive = true;
-    _inputIsJson = true;
-    document.getElementById('btnInputExpandAll').style.display = 'none';
-    document.getElementById('btnInputCollapseAll').style.display = 'none';
-    var toggle = document.getElementById('btnInputViewToggle');
-    toggle.style.display = '';
-    toggle.textContent = 'Text View';
+    body.innerHTML = html;
+    modal.classList.add('visible');
+}
+
+function closeDiffModal() {
+    document.getElementById('diffModal').classList.remove('visible');
 }
 
 /* --- JSON Schema Validate --- */
@@ -772,6 +811,10 @@ async function decryptData() {
 
 /* --- Keyboard shortcuts --- */
 document.addEventListener('keydown', (e) => {
+    // Escape = close diff modal
+    if (e.key === 'Escape') {
+        closeDiffModal();
+    }
     // Ctrl/Cmd + Enter = Prettify
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
@@ -797,4 +840,7 @@ document.addEventListener('keydown', (e) => {
 /* --- Init --- */
 updateInputStats();
 updateOutputStats();
-outputEl.addEventListener('input', updateOutputStats);
+outputEl.addEventListener('input', function() {
+    updateOutputStats();
+    _workspaceUserEdited = true;
+});
