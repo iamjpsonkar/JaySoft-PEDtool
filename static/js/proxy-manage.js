@@ -573,25 +573,57 @@ async function checkProxyHealth(id) {
     if (!id) id = document.getElementById('historyProxyId').value.trim();
     if (!id) { showToast('Enter a proxy identifier.', 'error'); return; }
     var container = document.getElementById('healthContainer');
-    if (container) container.innerHTML = '<div class="loading-state"><span class="spinner"></span> Checking upstream...</div>';
+    if (container) container.innerHTML = '<div class="loading-state"><span class="spinner"></span> Checking...</div>';
     try {
         var data = await api('/proxy/health/' + encodeURIComponent(id) + '/', 'GET');
         var status = data.upstream_status || 'unknown';
         var dotClass = 'health-' + status;
-        var html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;">';
+        var html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;">';
         html += '<div class="stat-card"><div class="stat-value"><span class="health-dot ' + dotClass + '"></span> ' + escapeHtml(status) + '</div><div class="stat-label">Upstream</div></div>';
         html += '<div class="stat-card"><div class="stat-value">' + (data.upstream_latency_ms != null ? data.upstream_latency_ms + 'ms' : '-') + '</div><div class="stat-label">Latency</div></div>';
         html += '<div class="stat-card"><div class="stat-value">' + (data.mock_count || 0) + '</div><div class="stat-label">Mocks</div></div>';
         html += '<div class="stat-card"><div class="stat-value">' + (data.history_count || 0) + '</div><div class="stat-label">History</div></div>';
         html += '</div>';
         if (data.error) html += '<p style="color:var(--danger);margin-top:10px;font-size:0.82rem;">' + escapeHtml(data.error) + '</p>';
-        html += '<p style="color:var(--text-muted);margin-top:10px;font-size:0.78rem;">Domain: ' + escapeHtml(data.api_domain || '-') + '</p>';
+        html += '<p style="color:var(--text-muted);margin-top:8px;font-size:0.78rem;">Domain: ' + escapeHtml(data.api_domain || '-') + '</p>';
+
+        // Rate limit info
+        try {
+            var rl = await api('/proxy/ratelimit/' + encodeURIComponent(id) + '/', 'GET');
+            html += '<div class="separator">Rate Limit</div>';
+            html += '<div style="display:flex;gap:16px;font-size:0.82rem;flex-wrap:wrap;">';
+            html += '<span>Max: <strong>' + (rl.max_requests || 'unlimited') + '</strong></span>';
+            html += '<span>Current: <strong>' + (rl.current_count || 0) + '</strong></span>';
+            html += '<span>Remaining: <strong>' + (rl.remaining || 'unlimited') + '</strong></span>';
+            html += '<span>Window: <strong>' + (rl.window_seconds || 60) + 's</strong></span>';
+            html += '</div>';
+        } catch(e) { /* rate limit info not available */ }
+
+        // Sequence reset
+        html += '<div class="separator">Sequence Controls</div>';
+        html += '<div class="inline-form">';
+        html += '<input type="text" id="seqResetEndpoint" placeholder="Endpoint (blank = all)" style="width:200px;" />';
+        html += '<button class="btn btn-outline btn-sm" onclick="resetSequences()">Reset Sequences</button>';
+        html += '</div>';
+
         if (container) container.innerHTML = html;
-        showToast(id + ': ' + status + (data.upstream_latency_ms ? ' (' + data.upstream_latency_ms + 'ms)' : ''), status === 'healthy' ? 'success' : 'error');
+        showToast(id + ': ' + status, status === 'healthy' ? 'success' : 'error');
     } catch (err) {
         handleApiError(err);
         if (container) container.innerHTML = '<div class="empty-state"><p>Failed to check health.</p></div>';
     }
+}
+
+async function resetSequences() {
+    var id = document.getElementById('historyProxyId').value.trim();
+    if (!id) return;
+    var endpoint = (document.getElementById('seqResetEndpoint') || {}).value || '';
+    var body = { proxy_identifier: id };
+    if (endpoint.trim()) body.end_point = endpoint.trim();
+    try {
+        var data = await api('/proxy/sequence/reset/', 'POST', body);
+        showToast(data.message || 'Sequences reset', 'success');
+    } catch (err) { handleApiError(err); }
 }
 
 /* ------------------------------------------------------------------ */

@@ -135,6 +135,20 @@
 .pill-section:hover {
     background: none; border-color: transparent; color: var(--text-muted);
 }
+.pill-toggle {
+    background: var(--primary-light) !important; color: var(--primary) !important;
+    border-color: var(--primary) !important; font-weight: 600; cursor: pointer;
+}
+.placeholder-bar-extra { margin-top: 6px; flex-wrap: wrap; gap: 6px; }
+
+/* Info icon tooltip */
+.info-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--surface-inset); border: 1px solid var(--border);
+    font-size: 0.72rem; color: var(--text-muted); cursor: help;
+    position: relative;
+}
 
 /* --- Mock builder rows --- */
 .mock-row {

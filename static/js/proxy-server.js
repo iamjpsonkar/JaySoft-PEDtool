@@ -1036,6 +1036,50 @@ async function applyTemplate() {
 /*  Init on page load                                                 */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/*  Placeholder bar toggle                                            */
+/* ------------------------------------------------------------------ */
+
+function toggleAllPlaceholders() {
+    var extra = document.getElementById('placeholderBarExtra');
+    var btn = document.getElementById('pillToggleBtn');
+    if (extra.style.display === 'none') {
+        extra.style.display = 'flex';
+        btn.innerHTML = 'Show less &#9652;';
+    } else {
+        extra.style.display = 'none';
+        btn.innerHTML = 'Show all &#9662;';
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Save as Template                                                  */
+/* ------------------------------------------------------------------ */
+
+async function saveAsTemplate() {
+    var payload = getMockPayload();
+    if (!payload) return;
+    var name = prompt('Template name:');
+    if (!name) return;
+    var category = prompt('Category (e.g. auth, crud, payment):', 'general') || 'general';
+    try {
+        await api('/proxy/templates/', 'POST', {
+            name: name,
+            template: payload.mock,
+            description: payload.method + ' ' + payload.end_point,
+            category: category
+        });
+        showToast('Template "' + name + '" saved', 'success');
+        loadTemplates();
+    } catch (e) {
+        showToast((e.data && e.data.error) || 'Failed to save template', 'error');
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Init                                                              */
+/* ------------------------------------------------------------------ */
+
 document.addEventListener('DOMContentLoaded', function() {
     _checkShareLink();
     loadTemplates();

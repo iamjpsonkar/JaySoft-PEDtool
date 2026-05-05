@@ -130,6 +130,7 @@
                     </label>
                     <span class="toggle-label">Sequence Mode</span>
                     <span class="hint" style="margin:0;">(Return different responses on consecutive calls)</span>
+                    <span class="info-icon" data-tooltip="Example: 1st call returns {loading:true}, 2nd call returns {status:done}">&#9432;</span>
                 </div>
                 <div id="sequenceBuilder" style="display:none;margin-bottom:14px;padding:14px;background:var(--surface-inset);border-radius:var(--radius-sm);border:1px solid var(--border);">
                     <label>Sequence Steps</label>
@@ -146,6 +147,7 @@
                     </label>
                     <span class="toggle-label">Conditional Mode</span>
                     <span class="hint" style="margin:0;">(Return different responses based on request conditions)</span>
+                    <span class="info-icon" data-tooltip="Example: if body.type=='vip' return {discount:20}, else return {discount:0}">&#9432;</span>
                 </div>
                 <div id="conditionalBuilder" style="display:none;margin-bottom:14px;padding:14px;background:var(--surface-inset);border-radius:var(--radius-sm);border:1px solid var(--border);">
                     <label>Conditions</label>
@@ -218,38 +220,41 @@
                 <!-- Raw JSON Tab -->
                 <div class="tab-content" id="tab-raw">
                     <label for="mock_json_raw">Mock Response JSON</label>
-                    <div class="placeholder-bar">
-                        <span class="pill pill-section">Request</span>
-                        <span class="pill" onclick="insertPlaceholder('jsonget(key)')">jsonget</span>
-                        <span class="pill" onclick="insertPlaceholder('headerget(Header-Name)')">headerget</span>
-                        <span class="pill" onclick="insertPlaceholder('paramget(param)')">paramget</span>
-                        <span class="pill" onclick="insertPlaceholder('pathparamget(prefix)')">pathparamget</span>
-                        <span class="pill pill-section">State</span>
-                        <span class="pill" onclick="insertPlaceholder('dbget(path.to.key, default)')">dbget</span>
-                        <span class="pill" onclick="insertPlaceholder('snippet(dbget(\\\'key\\\', 0))')">snippet+dbget</span>
-                        <span class="pill pill-section">Random</span>
-                        <span class="pill" onclick="insertPlaceholder('upper(8)')">upper</span>
-                        <span class="pill" onclick="insertPlaceholder('lower(8)')">lower</span>
-                        <span class="pill" onclick="insertPlaceholder('digit(6)')">digit</span>
-                        <span class="pill" onclick="insertPlaceholder('alnum(8,4)')">alnum</span>
-                        <span class="pill pill-section">Time</span>
-                        <span class="pill" onclick="insertPlaceholder('now()')">now</span>
-                        <span class="pill" onclick="insertPlaceholder('now_epoch()')">epoch</span>
-                        <span class="pill pill-section">Expr</span>
-                        <span class="pill" onclick="insertPlaceholder('snippet(1 + 1)')">snippet</span>
+                    <!-- Placeholder bar — first row visible, rest collapsible -->
+                    <div class="placeholder-bar" id="placeholderBar">
+                        <span class="pill" onclick="insertPlaceholder('jsonget(key)')" data-tooltip="Body field: jsonget(path, default)">jsonget</span>
+                        <span class="pill" onclick="insertPlaceholder('dbget(path, default)')" data-tooltip="Read from state">dbget</span>
+                        <span class="pill" onclick="insertPlaceholder('digit(6)')" data-tooltip="Random digits">digit</span>
+                        <span class="pill" onclick="insertPlaceholder('alnum(8,4)')" data-tooltip="Letters+digits mix">alnum</span>
+                        <span class="pill" onclick="insertPlaceholder('now()')" data-tooltip="ISO timestamp">now</span>
+                        <span class="pill" onclick="insertPlaceholder('snippet(1 + 1)')" data-tooltip="Expression evaluator">snippet</span>
+                        <span class="pill" onclick="insertPlaceholder('uuid()')" data-tooltip="Random UUID">uuid</span>
+                        <button class="pill pill-toggle" onclick="toggleAllPlaceholders()" id="pillToggleBtn">Show all &#9662;</button>
+                    </div>
+                    <div class="placeholder-bar placeholder-bar-extra" id="placeholderBarExtra" style="display:none;">
+                        <span class="pill" onclick="insertPlaceholder('headerget(Header-Name)')" data-tooltip="Request header value">headerget</span>
+                        <span class="pill" onclick="insertPlaceholder('paramget(param)')" data-tooltip="Query parameter">paramget</span>
+                        <span class="pill" onclick="insertPlaceholder('pathparamget(prefix)')" data-tooltip="URL path segment">pathparamget</span>
+                        <span class="pill" onclick="insertPlaceholder('upper(8)')" data-tooltip="Random uppercase">upper</span>
+                        <span class="pill" onclick="insertPlaceholder('lower(8)')" data-tooltip="Random lowercase">lower</span>
+                        <span class="pill" onclick="insertPlaceholder('now_epoch()')" data-tooltip="Unix epoch seconds">epoch</span>
+                        <span class="pill" onclick="insertPlaceholder('envget(MOCK_VAR, default)')" data-tooltip="Environment variable">envget</span>
+                        <span class="pill" onclick="insertPlaceholder('snippet(dbget(\\\'key\\\', 0))')" data-tooltip="snippet + dbget combo">snippet+dbget</span>
+                        <span class="pill" onclick="insertPlaceholder('body()')" data-tooltip="Entire request body">body()</span>
                     </div>
                     <textarea id="mock_json_raw" placeholder='{"status": "ok", "id": "digit(6)"}'></textarea>
                 </div>
 
-                <!-- Template selector (Feature 13) -->
-                <div style="margin-top:10px;display:flex;gap:8px;align-items:center;">
+                <!-- Template + Save as template -->
+                <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                     <select id="templateSelect" style="font-size:0.82rem;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);">
                         <option value="">-- Template --</option>
                     </select>
-                    <button class="btn btn-outline btn-sm" onclick="applyTemplate()">Apply Template</button>
+                    <button class="btn btn-outline btn-sm" onclick="applyTemplate()">Apply</button>
+                    <button class="btn btn-outline btn-sm" onclick="saveAsTemplate()">Save as Template</button>
                 </div>
 
-                <div style="margin-top:14px;display:flex;gap:10px;">
+                <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;">
                     <button class="btn btn-green" onclick="createMock()">Save Mock</button>
                     <button class="btn btn-outline" onclick="testMock()">Test Mock</button>
                     <button class="btn btn-outline" onclick="validateMock()">Validate</button>
