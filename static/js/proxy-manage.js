@@ -70,7 +70,7 @@ async function loadProxyList() {
         var proxies = data.proxies || data || [];
         if (!Array.isArray(proxies)) proxies = [];
         if (proxies.length === 0) {
-            container.innerHTML = '<div class="empty-state"><p>No proxies registered yet.</p></div>';
+            container.innerHTML = '<div class="empty-state"><p>No proxies registered yet.</p><a href="/proxy/" class="btn btn-blue btn-sm" style="margin-top:10px;">Create your first proxy &rarr;</a></div>';
             return;
         }
         _proxyList = proxies;

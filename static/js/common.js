@@ -44,6 +44,44 @@ function copyResponse(btn) {
     setTimeout(() => btn.textContent = 'Copy', 1500);
 }
 
+/* --- Button loading states --- */
+function setButtonLoading(btn, text) {
+    if (!btn) return;
+    btn.dataset.originalText = btn.textContent;
+    btn.textContent = text || 'Loading...';
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+}
+function resetButton(btn) {
+    if (!btn) return;
+    btn.textContent = btn.dataset.originalText || btn.textContent;
+    btn.disabled = false;
+    btn.style.opacity = '';
+}
+
+/* --- Modal focus trap --- */
+var _previousFocus = null;
+function trapFocus(modalEl) {
+    _previousFocus = document.activeElement;
+    var focusable = modalEl.querySelectorAll('button, input, textarea, select, [tabindex]:not([tabindex="-1"])');
+    if (focusable.length > 0) focusable[0].focus();
+    modalEl._focusTrap = function(e) {
+        if (e.key !== 'Tab') return;
+        var first = focusable[0];
+        var last = focusable[focusable.length - 1];
+        if (e.shiftKey) {
+            if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+        } else {
+            if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
+    };
+    modalEl.addEventListener('keydown', modalEl._focusTrap);
+}
+function releaseFocus(modalEl) {
+    if (modalEl._focusTrap) modalEl.removeEventListener('keydown', modalEl._focusTrap);
+    if (_previousFocus) _previousFocus.focus();
+}
+
 /* --- Mobile menu --- */
 function toggleMobileMenu() {
     var menu = document.getElementById('mobileMenu');
