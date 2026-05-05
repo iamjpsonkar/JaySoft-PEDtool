@@ -22,3 +22,30 @@ if (window.location.hash) {
         setTimeout(() => el.scrollIntoView({ behavior: 'smooth' }), 100);
     }
 }
+
+// TOC scroll-spy: highlight active link based on scroll position
+(function() {
+    var sidebar = document.getElementById('tocSidebar');
+    if (!sidebar) return;
+    var links = sidebar.querySelectorAll('a[href^="#"]');
+    var sections = [];
+    links.forEach(function(link) {
+        var target = document.querySelector(link.getAttribute('href'));
+        if (target) sections.push({ link: link, el: target });
+    });
+    if (sections.length === 0) return;
+
+    var debounce;
+    window.addEventListener('scroll', function() {
+        clearTimeout(debounce);
+        debounce = setTimeout(function() {
+            var scrollY = window.scrollY + 100;
+            var active = sections[0];
+            for (var i = 0; i < sections.length; i++) {
+                if (sections[i].el.offsetTop <= scrollY) active = sections[i];
+            }
+            links.forEach(function(l) { l.classList.remove('active'); });
+            if (active) active.link.classList.add('active');
+        }, 50);
+    });
+})();

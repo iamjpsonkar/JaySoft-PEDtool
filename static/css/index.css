@@ -397,6 +397,13 @@ textarea.editor:focus {
     word-break: break-all;
 }
 
+/* --- Tree keyboard focus --- */
+.jt-toggle:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+    border-radius: 3px;
+}
+
 /* --- JSON Tree Viewer --- */
 .json-tree-container {
     flex: 1;

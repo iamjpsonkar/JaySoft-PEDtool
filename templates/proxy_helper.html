@@ -29,6 +29,42 @@
     </div>
 
     <div class="page">
+        <!-- TOC Sidebar -->
+        <nav class="toc-sidebar" id="tocSidebar">
+            <div class="toc-section">Getting Started</div>
+            <a href="#ep-create">Register Proxy</a>
+            <a href="#ep-mock-create">Create Mock</a>
+            <a href="#ep-get">View Proxy</a>
+            <a href="#ep-proxy">Proxy Request</a>
+            <div class="toc-section">Management</div>
+            <a href="#ep-delete">Delete Proxy</a>
+            <a href="#ep-list">List Proxies</a>
+            <a href="#ep-clone">Clone</a>
+            <a href="#ep-mock-batch">Batch Ops</a>
+            <a href="#ep-mock-validate">Validate</a>
+            <div class="toc-section">State & Storage</div>
+            <a href="#state-api">State CRUD</a>
+            <a href="#ep-snapshots">Snapshots</a>
+            <a href="#state-store">_store (Write)</a>
+            <a href="#state-dbget">dbget (Read)</a>
+            <a href="#state-recipes">Recipes</a>
+            <a href="#ep-storage">Storage</a>
+            <div class="toc-section">Advanced</div>
+            <a href="#feat-delay">Delay & Profiles</a>
+            <a href="#feat-callback">Webhooks</a>
+            <a href="#feat-caching">Caching</a>
+            <a href="#feat-cors">CORS</a>
+            <a href="#feat-envget">envget()</a>
+            <a href="#feat-inheritance">Inheritance</a>
+            <a href="#feat-conditionals">Conditionals</a>
+            <a href="#feat-sequence">Sequences</a>
+            <div class="toc-section">JSON Tools</div>
+            <a href="#json-viewer">JSON Viewer</a>
+            <a href="#json-tools">Endpoints</a>
+        </nav>
+
+        <!-- Main content -->
+        <div class="page-content">
         <!-- Overview -->
         <div class="card">
             <h2>Proxy Server &amp; API Mocker</h2>
@@ -1667,6 +1703,7 @@ GET /proxy/history/my-proxy/?method=POST&amp;status_min=400&amp;source=mock</pre
         <div class="page-footer">
             PED Tools &mdash; Proxy, Mock &amp; JSON Workbench &mdash; Built by Jay Prakash Sonkar
         </div>
+        </div><!-- /.page-content -->
     </div>
 
     <script src="/static/js/proxy-helper.js"></script>

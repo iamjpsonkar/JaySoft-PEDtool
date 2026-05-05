@@ -440,7 +440,7 @@ function _renderNode(val, key, isLast, depth) {
         var html = '<div class="jt-node">';
         html += '<div class="jt-row">';
         if (count > 0) {
-            html += '<span class="jt-toggle' + (autoCollapse ? ' collapsed' : '') + '" onclick="_jtToggle(\'' + id + '\',this)" title="Click to expand/collapse">&#9660;</span>';
+            html += '<span class="jt-toggle' + (autoCollapse ? ' collapsed' : '') + '" onclick="_jtToggle(\'' + id + '\',this)" onkeydown="_jtKeyNav(event,\'' + id + '\',this)" tabindex="0" role="button" aria-expanded="' + (!autoCollapse) + '" aria-label="Toggle ' + (isObj ? 'object' : 'array') + ' with ' + count + ' items">&#9660;</span>';
         } else {
             html += '<span class="jt-spacer"></span>';
         }
@@ -512,7 +512,31 @@ function _jtToggle(id, arrow) {
     if (!el) return;
     var collapsed = el.classList.toggle('collapsed');
     arrow.classList.toggle('collapsed', collapsed);
+    arrow.setAttribute('aria-expanded', !collapsed);
     if (sum) sum.style.display = collapsed ? '' : 'none';
+}
+
+function _jtKeyNav(e, id, arrow) {
+    if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        _jtToggle(id, arrow);
+    } else if (e.key === 'ArrowRight') {
+        // Expand if collapsed
+        var el = document.getElementById(id);
+        if (el && el.classList.contains('collapsed')) { e.preventDefault(); _jtToggle(id, arrow); }
+    } else if (e.key === 'ArrowLeft') {
+        // Collapse if expanded
+        var el = document.getElementById(id);
+        if (el && !el.classList.contains('collapsed')) { e.preventDefault(); _jtToggle(id, arrow); }
+    } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        var next = arrow.closest('.jt-node').querySelector('.jt-node .jt-toggle');
+        if (next) next.focus();
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        var parent = arrow.closest('.jt-node').parentElement.closest('.jt-node');
+        if (parent) { var toggle = parent.querySelector(':scope > .jt-row > .jt-toggle'); if (toggle) toggle.focus(); }
+    }
 }
 
 function _jtCopyVal(el) {
