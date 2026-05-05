@@ -58,7 +58,7 @@
     </div>
 
     <div class="editors">
-        <!-- Input pane -->
+        <!-- Panel A -->
         <div class="editor-pane" id="inputPane">
             <div class="pane-header">
                 <span class="icon-text"><span class="icon">&#9998;</span> Panel A</span>
@@ -69,9 +69,23 @@
                     <button class="btn-sm" onclick="formatInput()" data-tooltip="Format JSON">Format</button>
                     <button class="btn-sm" onclick="copyInput()">Copy</button>
                     <button class="btn-sm" onclick="pasteInput()">Paste</button>
+                    <button class="btn-sm" onclick="toggleFindReplace('A')" data-tooltip="Ctrl+F">Find</button>
+                    <button class="btn-sm" onclick="sortLines('A')" data-tooltip="Sort lines alphabetically">Sort</button>
+                    <button class="btn-sm" onclick="dedupLines('A')" data-tooltip="Remove duplicate lines">Dedup</button>
+                    <button class="btn-sm" onclick="wrapUnwrap('A')" data-tooltip="Wrap/unwrap in array">[ ]</button>
                     <button class="btn-sm" onclick="moveToOutput()">To B &#8594;</button>
                     <button class="btn-sm" onclick="clearInput()">Clear</button>
                 </div>
+            </div>
+            <!-- Find & Replace bar -->
+            <div class="find-replace-bar" id="findBarA" style="display:none;">
+                <input type="text" id="findInputA" placeholder="Find..." onkeydown="if(event.key==='Enter')findNext('A')" />
+                <input type="text" id="replaceInputA" placeholder="Replace..." />
+                <button class="btn-sm" onclick="findNext('A')">Next</button>
+                <button class="btn-sm" onclick="replaceOne('A')">Replace</button>
+                <button class="btn-sm" onclick="replaceAll('A')">All</button>
+                <span class="find-count" id="findCountA"></span>
+                <button class="btn-sm" onclick="toggleFindReplace('A')" style="margin-left:auto;">&times;</button>
             </div>
             <textarea class="editor" id="inputEditor" placeholder="Paste JSON, encrypted data, or raw text here. Operations run on this pane." spellcheck="false"></textarea>
             <div class="json-tree-container" id="inputTreeView" style="display:none;"></div>
@@ -80,7 +94,7 @@
         <!-- Resize handle -->
         <div class="resize-handle" id="resizeHandle" title="Drag to resize"></div>
 
-        <!-- Workspace pane (editable — keeps user content, used for Diff B-side) -->
+        <!-- Panel B -->
         <div class="editor-pane" id="outputPane">
             <div class="pane-header">
                 <span class="icon-text"><span class="icon">&#128221;</span> Panel B</span>
@@ -91,9 +105,23 @@
                     <button class="btn-sm" onclick="formatOutput()" data-tooltip="Format JSON">Format</button>
                     <button class="btn-sm" onclick="copyOutput()">Copy</button>
                     <button class="btn-sm" onclick="pasteOutput()">Paste</button>
+                    <button class="btn-sm" onclick="toggleFindReplace('B')" data-tooltip="Ctrl+F">Find</button>
+                    <button class="btn-sm" onclick="sortLines('B')" data-tooltip="Sort lines alphabetically">Sort</button>
+                    <button class="btn-sm" onclick="dedupLines('B')" data-tooltip="Remove duplicate lines">Dedup</button>
+                    <button class="btn-sm" onclick="wrapUnwrap('B')" data-tooltip="Wrap/unwrap in array">[ ]</button>
                     <button class="btn-sm" onclick="moveToInput()">&#8592; To A</button>
                     <button class="btn-sm" onclick="clearOutput()">Clear</button>
                 </div>
+            </div>
+            <!-- Find & Replace bar -->
+            <div class="find-replace-bar" id="findBarB" style="display:none;">
+                <input type="text" id="findInputB" placeholder="Find..." onkeydown="if(event.key==='Enter')findNext('B')" />
+                <input type="text" id="replaceInputB" placeholder="Replace..." />
+                <button class="btn-sm" onclick="findNext('B')">Next</button>
+                <button class="btn-sm" onclick="replaceOne('B')">Replace</button>
+                <button class="btn-sm" onclick="replaceAll('B')">All</button>
+                <span class="find-count" id="findCountB"></span>
+                <button class="btn-sm" onclick="toggleFindReplace('B')" style="margin-left:auto;">&times;</button>
             </div>
             <textarea class="editor" id="outputEditor" placeholder="Results appear here. Also use for Diff (A vs B) or as scratchpad. Your edits are never overwritten." spellcheck="false"></textarea>
             <div class="json-tree-container" id="jsonTreeView" style="display:none;"></div>

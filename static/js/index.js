@@ -809,11 +809,174 @@ async function decryptData() {
     });
 })();
 
+/* --- Find & Replace --- */
+var _findState = { A: { idx: -1 }, B: { idx: -1 } };
+
+function _getEditor(panel) {
+    return panel === 'A' ? inputEl : outputEl;
+}
+
+function toggleFindReplace(panel) {
+    var bar = document.getElementById('findBar' + panel);
+    if (bar.style.display === 'none') {
+        bar.style.display = 'flex';
+        document.getElementById('findInput' + panel).focus();
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+function findNext(panel) {
+    var editor = _getEditor(panel);
+    var query = document.getElementById('findInput' + panel).value;
+    if (!query) return;
+
+    var text = editor.value;
+    var startPos = (_findState[panel].idx >= 0) ? _findState[panel].idx + 1 : 0;
+    var idx = text.indexOf(query, startPos);
+    if (idx === -1 && startPos > 0) idx = text.indexOf(query, 0); // wrap around
+
+    // Count total matches
+    var count = 0;
+    var pos = 0;
+    while ((pos = text.indexOf(query, pos)) !== -1) { count++; pos += query.length; }
+    document.getElementById('findCount' + panel).textContent = count + ' found';
+
+    if (idx >= 0) {
+        editor.focus();
+        editor.setSelectionRange(idx, idx + query.length);
+        _findState[panel].idx = idx;
+    } else {
+        _findState[panel].idx = -1;
+        showToast('Not found', 'error');
+    }
+}
+
+function replaceOne(panel) {
+    var editor = _getEditor(panel);
+    var query = document.getElementById('findInput' + panel).value;
+    var replacement = document.getElementById('replaceInput' + panel).value;
+    if (!query) return;
+
+    var start = editor.selectionStart;
+    var end = editor.selectionEnd;
+    var selected = editor.value.substring(start, end);
+
+    if (selected === query) {
+        editor.value = editor.value.substring(0, start) + replacement + editor.value.substring(end);
+        editor.setSelectionRange(start, start + replacement.length);
+        _findState[panel].idx = start + replacement.length - 1;
+        if (panel === 'A') updateInputStats(); else updateOutputStats();
+        findNext(panel);
+    } else {
+        findNext(panel);
+    }
+}
+
+function replaceAll(panel) {
+    var editor = _getEditor(panel);
+    var query = document.getElementById('findInput' + panel).value;
+    var replacement = document.getElementById('replaceInput' + panel).value;
+    if (!query) return;
+
+    var count = 0;
+    var result = editor.value;
+    while (result.indexOf(query) !== -1) {
+        result = result.replace(query, replacement);
+        count++;
+        if (count > 100000) break; // safety
+    }
+    editor.value = result;
+    if (panel === 'A') updateInputStats(); else updateOutputStats();
+    document.getElementById('findCount' + panel).textContent = count + ' replaced';
+    showToast(count + ' replacement(s) made', 'success');
+}
+
+/* --- Sort Lines --- */
+function sortLines(panel) {
+    var editor = _getEditor(panel);
+    var lines = editor.value.split('\n');
+    lines.sort();
+    editor.value = lines.join('\n');
+    if (panel === 'A') updateInputStats(); else updateOutputStats();
+    showToast('Lines sorted', 'success');
+}
+
+/* --- Deduplicate Lines --- */
+function dedupLines(panel) {
+    var editor = _getEditor(panel);
+    var lines = editor.value.split('\n');
+    var seen = new Set();
+    var unique = [];
+    var removed = 0;
+    lines.forEach(function(line) {
+        if (!seen.has(line)) {
+            seen.add(line);
+            unique.push(line);
+        } else {
+            removed++;
+        }
+    });
+    editor.value = unique.join('\n');
+    if (panel === 'A') updateInputStats(); else updateOutputStats();
+    showToast(removed + ' duplicate line(s) removed', 'success');
+}
+
+/* --- Wrap/Unwrap in Array --- */
+function wrapUnwrap(panel) {
+    var editor = _getEditor(panel);
+    var text = editor.value.trim();
+    if (!text) return;
+
+    // If it's already an array, unwrap (extract first element or join)
+    try {
+        var parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+            // Unwrap: if single element, extract it; if multiple, show comma-separated
+            if (parsed.length === 1) {
+                editor.value = JSON.stringify(parsed[0], null, 2);
+            } else {
+                editor.value = parsed.map(function(item) { return JSON.stringify(item, null, 2); }).join('\n');
+            }
+            if (panel === 'A') updateInputStats(); else updateOutputStats();
+            showToast('Unwrapped from array', 'success');
+            return;
+        }
+    } catch(e) { /* not parseable as array, wrap it */ }
+
+    // Wrap: try to parse as JSON first, else wrap the raw text as a string element
+    try {
+        var obj = JSON.parse(text);
+        editor.value = JSON.stringify([obj], null, 2);
+    } catch(e) {
+        // Try wrapping each line as an array element
+        var lines = text.split('\n').filter(function(l) { return l.trim(); });
+        var items = lines.map(function(l) {
+            try { return JSON.parse(l.trim()); }
+            catch(e2) { return l.trim(); }
+        });
+        editor.value = JSON.stringify(items, null, 2);
+    }
+    if (panel === 'A') updateInputStats(); else updateOutputStats();
+    showToast('Wrapped in array', 'success');
+}
+
 /* --- Keyboard shortcuts --- */
 document.addEventListener('keydown', (e) => {
-    // Escape = close diff modal
+    // Escape = close diff modal + find bars
     if (e.key === 'Escape') {
         closeDiffModal();
+        document.getElementById('findBarA').style.display = 'none';
+        document.getElementById('findBarB').style.display = 'none';
+    }
+    // Ctrl/Cmd + F = open find in focused panel
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        if (document.activeElement === outputEl) {
+            toggleFindReplace('B');
+        } else {
+            toggleFindReplace('A');
+        }
     }
     // Ctrl/Cmd + Enter = Prettify
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
