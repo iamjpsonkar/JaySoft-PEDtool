@@ -23,7 +23,15 @@ inputEl.addEventListener('input', updateInputStats);
 function setOutput(text) {
     outputEl.value = text;
     updateOutputStats();
-    // Always switch back to text view so the textarea is visible
+    // Auto-detect: if output is valid JSON object/array, show tree view;
+    // otherwise show text view (encrypt/decrypt/errors/plain text)
+    try {
+        var parsed = JSON.parse(text);
+        if (parsed !== null && typeof parsed === 'object') {
+            _showTreeView(parsed);
+            return;
+        }
+    } catch (e) { /* not JSON — fall through to text view */ }
     showTextView();
 }
 
@@ -192,14 +200,11 @@ function jsonView() {
 
     var result = _smartParseJson(raw);
     if (result.data !== null && result.data !== undefined) {
-        // Also set text output for copy/move
+        // setOutput auto-detects JSON and shows tree view
         setOutput(JSON.stringify(result.data, null, 2));
-        // Render tree
-        _showTreeView(result.data);
         var msg = result.corrected ? 'Auto-corrected and rendered' : 'Valid JSON';
         showToast(msg, 'success');
     } else {
-        showTextView();
         setOutput('// Not valid JSON. Errors:\n// ' + (result.errors || []).join('\n// ') + '\n\n// Raw input:\n' + raw);
         showToast('Could not parse as JSON', 'error');
     }
