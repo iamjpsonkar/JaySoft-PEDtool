@@ -115,13 +115,30 @@ function jsonView() {
     const raw = inputEl.value.trim();
     if (!raw) { showToast('Input is empty', 'error'); return; }
 
-    // Try direct parse first
-    try {
-        var parsed = JSON.parse(raw);
-        setOutput(JSON.stringify(parsed, null, 2));
-        showToast('Valid JSON — formatted', 'success');
-        return;
-    } catch (e) { /* not valid JSON, try recovery */ }
+    // Strip wrapping quotes/backticks that sometimes surround pasted JSON
+    var cleaned = raw;
+    if (/^['"`].*['"`]$/.test(cleaned) && cleaned.length >= 2) {
+        var inner = cleaned.slice(1, -1);
+        // Only strip if the inner content looks like JSON (starts with { or [)
+        if (/^\s*[\[{]/.test(inner)) {
+            cleaned = inner;
+        }
+    }
+
+    // Try direct parse first (original, then stripped)
+    var candidates = [raw];
+    if (cleaned !== raw) candidates.push(cleaned);
+    for (var ci = 0; ci < candidates.length; ci++) {
+        try {
+            var parsed = JSON.parse(candidates[ci]);
+            setOutput(JSON.stringify(parsed, null, 2));
+            showToast('Valid JSON — formatted', 'success');
+            return;
+        } catch (e) { /* not valid JSON, try recovery */ }
+    }
+
+    // Use the stripped version for recovery attempts
+    raw = cleaned;
 
     // Try extracting JSON from surrounding text
     var result = '';
