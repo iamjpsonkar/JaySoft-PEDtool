@@ -512,6 +512,70 @@ Common log prefixes:
 
 ## 23. Changelog (recent)
 
+### 2026-05-05 — Complete UI Overhaul (5 phases)
+
+**Files changed:** All templates, all CSS, all JS, `app.py`, `bootstrap.py`, `context.md`
+
+**Summary:** Comprehensive UI/UX overhaul across all pages based on deep analysis. Implemented in 5 phases:
+
+**Phase 1 — Reduce Cognitive Overload:**
+- Toolbar simplified: primary actions always visible, "More" dropdown for extras
+- Pane actions: 4 always visible (Format, Copy, Find, Clear) + "⋯" overflow menu for 5 more
+- Click-to-inspect: clicking proxy row auto-fills Inspector and loads data
+- Proxy list search/filter input
+- Placeholder pill bar: collapsed to 7 common pills + "Show all" toggle
+- Info tooltips on Sequence/Conditional mode toggles
+- Save as Template button in mock builder
+
+**Phase 2 — Missing UI Surfaces:**
+- State viewer/editor tab (view, edit/merge/clear proxy state via modal)
+- User management tab (add/delete proxy users, inline form)
+- Rate limit display + Sequence reset controls in Health tab
+- Mock tags: tag pills in mocks table, inline edit, tag-aware loadMocks()
+- Mock search: filter existing mocks by endpoint text
+
+**Phase 3 — Accessibility:**
+- Semantic tabs: role="tablist"/"tab"/"tabpanel", aria-selected, aria-controls
+- Tab keyboard navigation: Arrow Left/Right, Home/End
+- Modal focus trap utility (trapFocus/releaseFocus in common.js)
+- aria-label on icon-only buttons (close, hamburger, FAB, theme toggle)
+- .sr-only screen-reader-only CSS class
+- Tree view: tabindex="0", role="button", aria-expanded, keyboard nav (Enter/Space/Arrows)
+- Focus ring on tree toggles
+
+**Phase 4 — Mobile & Responsive:**
+- Hamburger menu at ≤768px with slide-in panel
+- Toolbar horizontal scroll (no wrapping) on mobile
+- .table-responsive wrapper for horizontal scroll on tables
+- Pane swap button (↕) visible on mobile to exchange Panel A/B content
+- Resize handle hidden on mobile
+- min-height: 35vh per pane when stacked
+- Larger touch targets (.btn-sm min-height: 36px on mobile)
+- Author badge hidden on mobile
+
+**Phase 5 — Visual Polish & Guidance:**
+- Smart empty states with CTA buttons
+- History filters always visible (no collapsible)
+- Button loading state utilities (setButtonLoading/resetButton)
+- Docs page: sticky TOC sidebar (220px, scroll-spy highlights active section)
+- Suggestions page: search/filter input
+- Encrypt/Decrypt: IV/Secret inputs always visible inline (one-click operation)
+
+**New utilities in common.js:**
+- `setButtonLoading(btn, text)` / `resetButton(btn)`
+- `trapFocus(modalEl)` / `releaseFocus(modalEl)`
+- `toggleMobileMenu()`
+
+**New CSS classes:**
+- `.table-responsive`, `.sr-only`, `.topbar-hamburger`, `.mobile-menu`, `.mobile-menu-overlay`
+- `.proxy-row-selected`, `.tag-pill`, `.tag-row`, `.info-icon`
+- `.pane-overflow-menu`, `.pane-more-btn`, `.swap-btn`
+- `.toolbar-dropdown`, `.toolbar-dropdown-wrap`, `.toolbar-dropdown-sep`
+- `.toc-sidebar`, `.toc-section`, `.page-content`
+- `.pill-toggle`, `.placeholder-bar-extra`
+
+---
+
 ### 2026-05-05 — Documentation update for all new features
 
 **File changed:** `templates/proxy_helper.html`, `context.md`
