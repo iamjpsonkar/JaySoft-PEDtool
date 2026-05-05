@@ -11,7 +11,7 @@
 </head>
 <body>
     <div class="topbar">
-        <h1>Proxy Server &amp; Mock Builder</h1>
+        <h1>Mock Builder <span class="page-subtitle">Proxy Server &amp; Mock Editor</span></h1>
         <a href="/proxy/helper">Docs</a>
         <a href="/">Home</a>
         {% if session.get('authenticated') %}
@@ -34,7 +34,7 @@
         <div class="grid">
             <!-- Register Proxy -->
             <div class="card">
-                <h2>1. Register Proxy Server</h2>
+                <h2 class="icon-text"><span class="icon">&#128640;</span> 1. Register Proxy Server</h2>
                 <div class="field">
                     <label for="api_domain">API Domain</label>
                     <div class="hint">Base URL of the real API to proxy (e.g. https://api.example.com)</div>
@@ -50,7 +50,7 @@
 
             <!-- Lookup Proxy -->
             <div class="card">
-                <h2>Lookup Proxy</h2>
+                <h2 class="icon-text"><span class="icon">&#128269;</span> Lookup Proxy</h2>
                 <div class="field">
                     <label for="lookup_id">Proxy Identifier</label>
                     <div class="hint">Enter the identifier to view its config and mocks</div>
@@ -66,7 +66,7 @@
         <!-- ================================================================ -->
         <div style="margin-top:24px;">
             <div class="card full">
-                <h2>2. Create Mock Response</h2>
+                <h2 class="icon-text"><span class="icon">&#9889;</span> 2. Create Mock Response</h2>
 
                 <div class="grid" style="gap:14px;">
                     <div class="field">
@@ -259,7 +259,7 @@
         <!-- ================================================================ -->
         <div style="margin-top:24px;">
             <div class="card full">
-                <h2>Existing Mocks</h2>
+                <h2 class="icon-text"><span class="icon">&#128203;</span> Existing Mocks</h2>
                 <div class="field" style="max-width:450px;">
                     <label for="mocks_proxy_id">Proxy Identifier</label>
                     <div style="display:flex;gap:8px;">
@@ -279,6 +279,10 @@
         <!-- Response area -->
         <div style="margin-top:24px;">
             <div id="mainResponse" class="response-box"></div>
+        </div>
+
+        <div class="page-footer">
+            PED Tools &mdash; Proxy, Mock &amp; JSON Workbench
         </div>
     </div>
 

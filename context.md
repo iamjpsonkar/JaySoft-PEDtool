@@ -512,6 +512,64 @@ Common log prefixes:
 
 ## 23. Changelog (recent)
 
+### 2026-05-05 — UI Overhaul + JSON View feature
+
+**Files changed:** `static/css/common.css`, `static/css/index.css`, `static/css/proxy-manage.css`, `static/js/index.js`, `static/js/proxy-manage.js`, `templates/index.html`, `templates/proxy_manage.html`, `templates/proxy_server.html`, `context.md`
+
+**New feature: JSON View (smart JSON formatter)**
+- `jsonView()` in index.js — intelligently formats any input, even non-standard JSON
+- Tries direct `JSON.parse()` first; falls back to extracting embedded JSON from text
+- Attempts auto-correction: single quotes to double, trailing commas, unquoted keys
+- Shows formatted result with notes when corrections applied
+- Accessible via toolbar "JSON View" button and `Ctrl+Shift+V` keyboard shortcut
+- No backend endpoint needed — runs client-side
+
+**Design system additions (common.css):**
+- `.page-subtitle` — muted subtitle text next to page title
+- `.page-footer` — centered footer with version info
+- `.spinner` + `.loading-state` — animated loading indicators
+- `kbd` — styled keyboard shortcut hints
+- `.tab-bar` + `.tab-bar-item` + `.tab-panel` — reusable tabbed interface
+- `.icon-text` + `.icon` — inline icon+text pattern
+- `.badge` variants — `.badge-primary`, `.badge-success`, `.badge-danger`, `.badge-muted`
+- `.collapsible-header` + `.collapsible-body` — click-to-toggle sections
+- `.separator` — labeled horizontal divider
+- `[data-tooltip]` — pure CSS tooltips on hover
+- Responsive adjustments for `.tab-bar` on mobile
+
+**Index page improvements:**
+- Page subtitle: "JSON & Encryption Workbench"
+- Toolbar groups now have section labels ("JSON", "AES")
+- All toolbar buttons have `data-tooltip` hints
+- Drag-to-resize handle between Input/Output editor panes
+- Status bar shows line counts per pane
+- Keyboard shortcut reference in status bar (`Ctrl+Enter`, `Ctrl+Shift+E/D`)
+- JSON View button added to Prettify toolbar group
+- New `spellcheck="false"` on editor textareas
+- `tab-size: 2` on editors for better indentation
+- Resize handle CSS with hover state and grab indicator
+
+**Manage page improvements:**
+- Tabbed Inspector panel replaces separate cards: History, Snapshots, Analytics, Health, Storage
+- Card headers with inline actions (`.card-header` flex layout)
+- Collapsible history filter panel (click "Filters" to expand)
+- Loading spinners replace static "Loading..." text
+- Health tab: upstream status with color-coded health dot, latency, mock/history counts
+- Storage tab: visual meter bar showing % of 500 MB used, stat cards for all counts
+- Section icons on headings
+- Page footer added
+- `.source-mock_miss` badge styling
+- `.health-dot` with glow shadow indicators
+- `.storage-meter` + `.storage-meter-fill` with ok/warn/danger colors
+- Stat cards now have hover lift effect
+
+**Proxy Server page improvements:**
+- Section headers with icons (rocket, magnifier, lightning, clipboard)
+- Page subtitle: "Proxy Server & Mock Editor"
+- Page footer added
+
+---
+
 ### 2026-05-01 — JSON Toolbox (5 new /ped/ endpoints)
 
 **Files changed:** `app.py`, `static/js/index.js`, `templates/index.html`, `context.md`

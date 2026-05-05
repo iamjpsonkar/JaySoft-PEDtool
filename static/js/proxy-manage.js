@@ -9,6 +9,18 @@ function toggleSection(bodyId, chevronId) {
     chevron.classList.toggle('collapsed');
 }
 
+/* ------------------------------------------------------------------ */
+/*  Tab switching for Inspector panel                                  */
+/* ------------------------------------------------------------------ */
+
+function switchManageTab(name, el) {
+    document.querySelectorAll('.tab-bar-item').forEach(function(t) { t.classList.remove('active'); });
+    document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+    if (el) el.classList.add('active');
+    var panel = document.getElementById('tab-' + name);
+    if (panel) panel.classList.add('active');
+}
+
 function formatJson(obj) {
     try {
         if (typeof obj === 'string') obj = JSON.parse(obj);
@@ -48,7 +60,7 @@ async function checkHealth() {
 
 async function loadProxyList() {
     var container = document.getElementById('proxyListContainer');
-    container.innerHTML = '<div class="empty-state"><p>Loading...</p></div>';
+    container.innerHTML = '<div class="loading-state"><span class="spinner"></span> Loading proxies...</div>';
     try {
         var data = await api('/proxy/list/', 'GET');
         var proxies = data.proxies || data || [];
@@ -464,10 +476,24 @@ async function loadAnalytics() {
 /* ------------------------------------------------------------------ */
 
 async function loadStorageInfo() {
+    var container = document.getElementById('storageContainer');
+    if (container) container.innerHTML = '<div class="loading-state"><span class="spinner"></span> Checking storage...</div>';
     try {
         var data = await api('/proxy/storage/', 'GET');
-        showResponse('mainResponse', data);
-        showToast('DB size: ' + data.db_size_mb + ' MB, History: ' + data.history_count + ' rows', 'success');
+        var pct = Math.min(100, (data.db_size_bytes / (500 * 1024 * 1024)) * 100);
+        var meterClass = pct < 60 ? 'meter-ok' : (pct < 85 ? 'meter-warn' : 'meter-danger');
+        var html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:16px;">';
+        html += '<div class="stat-card"><div class="stat-value">' + data.db_size_mb + ' MB</div><div class="stat-label">DB Size</div></div>';
+        html += '<div class="stat-card"><div class="stat-value">' + data.history_count + '</div><div class="stat-label">History Rows</div></div>';
+        html += '<div class="stat-card"><div class="stat-value">' + data.mock_count + '</div><div class="stat-label">Mocks</div></div>';
+        html += '<div class="stat-card"><div class="stat-value">' + data.proxy_count + '</div><div class="stat-label">Proxies</div></div>';
+        html += '<div class="stat-card"><div class="stat-value">' + data.snapshot_count + '</div><div class="stat-label">Snapshots</div></div>';
+        html += '</div>';
+        html += '<label style="font-size:0.78rem;">Storage usage (of 500 MB)</label>';
+        html += '<div class="storage-meter"><div class="storage-meter-fill ' + meterClass + '" style="width:' + Math.max(1, pct) + '%;"></div></div>';
+        html += '<span style="font-size:0.72rem;color:var(--text-muted);">' + pct.toFixed(1) + '% used &mdash; History limit: ' + data.history_limit + ' rows/proxy</span>';
+        if (container) container.innerHTML = html;
+        showToast('DB: ' + data.db_size_mb + ' MB (' + pct.toFixed(1) + '% of 500 MB)', 'success');
     } catch (err) { handleApiError(err); }
 }
 
@@ -488,13 +514,26 @@ async function runCleanup() {
 async function checkProxyHealth(id) {
     if (!id) id = document.getElementById('historyProxyId').value.trim();
     if (!id) { showToast('Enter a proxy identifier.', 'error'); return; }
+    var container = document.getElementById('healthContainer');
+    if (container) container.innerHTML = '<div class="loading-state"><span class="spinner"></span> Checking upstream...</div>';
     try {
         var data = await api('/proxy/health/' + encodeURIComponent(id) + '/', 'GET');
-        showResponse('mainResponse', data);
         var status = data.upstream_status || 'unknown';
-        var color = status === 'healthy' ? 'success' : (status === 'degraded' ? 'error' : 'error');
-        showToast(id + ': ' + status + (data.upstream_latency_ms ? ' (' + data.upstream_latency_ms + 'ms)' : ''), color);
-    } catch (err) { handleApiError(err); }
+        var dotClass = 'health-' + status;
+        var html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;">';
+        html += '<div class="stat-card"><div class="stat-value"><span class="health-dot ' + dotClass + '"></span> ' + escapeHtml(status) + '</div><div class="stat-label">Upstream</div></div>';
+        html += '<div class="stat-card"><div class="stat-value">' + (data.upstream_latency_ms != null ? data.upstream_latency_ms + 'ms' : '-') + '</div><div class="stat-label">Latency</div></div>';
+        html += '<div class="stat-card"><div class="stat-value">' + (data.mock_count || 0) + '</div><div class="stat-label">Mocks</div></div>';
+        html += '<div class="stat-card"><div class="stat-value">' + (data.history_count || 0) + '</div><div class="stat-label">History</div></div>';
+        html += '</div>';
+        if (data.error) html += '<p style="color:var(--danger);margin-top:10px;font-size:0.82rem;">' + escapeHtml(data.error) + '</p>';
+        html += '<p style="color:var(--text-muted);margin-top:10px;font-size:0.78rem;">Domain: ' + escapeHtml(data.api_domain || '-') + '</p>';
+        if (container) container.innerHTML = html;
+        showToast(id + ': ' + status + (data.upstream_latency_ms ? ' (' + data.upstream_latency_ms + 'ms)' : ''), status === 'healthy' ? 'success' : 'error');
+    } catch (err) {
+        handleApiError(err);
+        if (container) container.innerHTML = '<div class="empty-state"><p>Failed to check health.</p></div>';
+    }
 }
 
 /* ------------------------------------------------------------------ */

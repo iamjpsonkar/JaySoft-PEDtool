@@ -11,7 +11,7 @@
 </head>
 <body>
     <div class="topbar">
-        <h1>PED Tools</h1>
+        <h1>PED Tools <span class="page-subtitle">JSON &amp; Encryption Workbench</span></h1>
         <a href="/" class="active">Home</a>
         <a href="/proxy/">Proxy Server</a>
         <a href="/proxy/helper">Docs</a>
@@ -31,27 +31,28 @@
         <!-- Prettify / Minify group -->
         <div class="toolbar-group">
             <input type="checkbox" id="processEscape" />
-            <label for="processEscape">Process Escapes</label>
-            <button class="btn btn-blue" onclick="prettify()">Prettify</button>
-            <button class="btn btn-outline" onclick="minifyJson()">Minify</button>
+            <label for="processEscape">Escapes</label>
+            <button class="btn btn-blue" onclick="prettify()" data-tooltip="Ctrl+Enter">Prettify</button>
+            <button class="btn btn-outline" onclick="minifyJson()" data-tooltip="Compact JSON">Minify</button>
+            <button class="btn btn-outline" onclick="jsonView()" data-tooltip="Ctrl+Shift+V — Smart format any text">JSON View</button>
         </div>
 
         <!-- JSON Tools group -->
         <div class="toolbar-group">
-            <button class="btn btn-outline" onclick="jsonPathQuery()">Path Query</button>
-            <button class="btn btn-outline" onclick="jsonDiffTool()">Diff</button>
-            <button class="btn btn-outline" onclick="jsonSchemaValidate()">Validate Schema</button>
-            <button class="btn btn-outline" onclick="jsonTransform()">Transform</button>
+            <span class="toolbar-group-label">JSON</span>
+            <button class="btn btn-outline" onclick="jsonPathQuery()" data-tooltip="Extract by dot-path">Path</button>
+            <button class="btn btn-outline" onclick="jsonDiffTool()" data-tooltip="Input vs Output">Diff</button>
+            <button class="btn btn-outline" onclick="jsonSchemaValidate()" data-tooltip="Validate structure">Schema</button>
+            <button class="btn btn-outline" onclick="jsonTransform()" data-tooltip="Transform pipeline">Transform</button>
         </div>
 
         <!-- Encrypt/Decrypt group -->
         <div class="toolbar-group">
-            <label for="encIv">IV:</label>
-            <input type="text" id="encIv" placeholder="Enter enc_iv" />
-            <label for="secret">Secret:</label>
-            <input type="text" id="secret" placeholder="Enter secret" />
-            <button class="btn btn-green" onclick="encryptData()">Encrypt</button>
-            <button class="btn btn-blue" onclick="decryptData()">Decrypt</button>
+            <span class="toolbar-group-label">AES</span>
+            <input type="text" id="encIv" placeholder="IV" />
+            <input type="text" id="secret" placeholder="Secret" />
+            <button class="btn btn-green" onclick="encryptData()" data-tooltip="Ctrl+Shift+E">Encrypt</button>
+            <button class="btn btn-blue" onclick="decryptData()" data-tooltip="Ctrl+Shift+D">Decrypt</button>
         </div>
     </div>
 
@@ -59,33 +60,45 @@
         <!-- Input pane -->
         <div class="editor-pane">
             <div class="pane-header">
-                <span>Input</span>
+                <span class="icon-text"><span class="icon">&#9998;</span> Input</span>
                 <div class="pane-actions">
-                    <button class="btn-sm" onclick="formatInput()">Format</button>
+                    <button class="btn-sm" onclick="formatInput()" data-tooltip="Format JSON">Format</button>
                     <button class="btn-sm" onclick="clearInput()">Clear</button>
                     <button class="btn-sm" onclick="pasteInput()">Paste</button>
                 </div>
             </div>
-            <textarea class="editor" id="inputEditor" placeholder="Paste JSON, encrypted data, or raw text here..."></textarea>
+            <textarea class="editor" id="inputEditor" placeholder="Paste JSON, encrypted data, or raw text here..." spellcheck="false"></textarea>
         </div>
+
+        <!-- Resize handle -->
+        <div class="resize-handle" id="resizeHandle" title="Drag to resize"></div>
 
         <!-- Output pane -->
         <div class="editor-pane">
             <div class="pane-header">
-                <span>Output</span>
+                <span class="icon-text"><span class="icon">&#10004;</span> Output</span>
                 <div class="pane-actions">
                     <button class="btn-sm" onclick="copyOutput()">Copy</button>
-                    <button class="btn-sm" onclick="moveToInput()">&#8592; Use as Input</button>
+                    <button class="btn-sm" onclick="moveToInput()">&#8592; To Input</button>
                     <button class="btn-sm" onclick="clearOutput()">Clear</button>
                 </div>
             </div>
-            <textarea class="editor" id="outputEditor" placeholder="Results appear here..." readonly></textarea>
+            <textarea class="editor" id="outputEditor" placeholder="Results appear here..." readonly spellcheck="false"></textarea>
         </div>
     </div>
 
     <div class="statusbar">
         <span id="inputStatus">Input: 0 chars</span>
+        <span id="inputLines">0 lines</span>
+        <span class="statusbar-sep">|</span>
         <span id="outputStatus">Output: 0 chars</span>
+        <span id="outputLines">0 lines</span>
+        <span class="statusbar-spacer"></span>
+        <span class="statusbar-hint">
+            <kbd>Ctrl</kbd>+<kbd>Enter</kbd> Prettify &nbsp;
+            <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd> Encrypt &nbsp;
+            <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> Decrypt
+        </span>
     </div>
 
     <div id="toast" class="toast"></div>

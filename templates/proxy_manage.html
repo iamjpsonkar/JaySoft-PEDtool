@@ -11,7 +11,7 @@
 <body>
     <!-- Topbar -->
     <div class="topbar">
-        <h1>Proxy Management Dashboard</h1>
+        <h1>Manage <span class="page-subtitle">Proxy Dashboard</span></h1>
         <a href="/proxy/">Mock Builder</a>
         <a href="/proxy/helper">Docs</a>
         <a href="/">Home</a>
@@ -32,12 +32,13 @@
         <!-- Proxy List & Management                                          -->
         <!-- ================================================================ -->
         <div class="card">
-            <h2>Proxy List &amp; Management</h2>
-
-            <div class="action-bar">
-                <button class="btn btn-blue btn-sm" onclick="loadProxyList()">Refresh List</button>
-                <button class="btn btn-green btn-sm" onclick="exportAll()">Export All</button>
-                <button class="btn btn-outline btn-sm" onclick="toggleImportSection()">Import</button>
+            <div class="card-header">
+                <h2 class="icon-text"><span class="icon">&#9776;</span> Proxies</h2>
+                <div class="action-bar">
+                    <button class="btn btn-blue btn-sm" onclick="loadProxyList()">Refresh</button>
+                    <button class="btn btn-green btn-sm" onclick="exportAll()">Export All</button>
+                    <button class="btn btn-outline btn-sm" onclick="toggleImportSection()">Import</button>
+                </div>
             </div>
 
             <!-- Import Section (hidden) -->
@@ -57,11 +58,11 @@
                 <div class="hint">Clone all mocks from one proxy to another.</div>
                 <div class="inline-form" style="margin-top:8px;">
                     <div class="field" style="flex:1;">
-                        <label for="cloneSource">Source Identifier</label>
+                        <label for="cloneSource">Source</label>
                         <input type="text" id="cloneSource" placeholder="source-proxy" />
                     </div>
                     <div class="field" style="flex:1;">
-                        <label for="cloneTarget">Target Identifier</label>
+                        <label for="cloneTarget">Target</label>
                         <input type="text" id="cloneTarget" placeholder="target-proxy" />
                     </div>
                     <button class="btn btn-blue btn-sm" onclick="cloneProxy()">Clone</button>
@@ -71,9 +72,7 @@
 
             <!-- Proxy Table -->
             <div id="proxyListContainer">
-                <div class="empty-state">
-                    <p>Loading proxy list...</p>
-                </div>
+                <div class="loading-state"><span class="spinner"></span> Loading proxies...</div>
             </div>
 
             <!-- Export Response Area -->
@@ -81,86 +80,122 @@
         </div>
 
         <!-- ================================================================ -->
-        <!-- Request History                                                  -->
+        <!-- Inspector Panel — Tabbed (History, Snapshots, Analytics, Health)  -->
         <!-- ================================================================ -->
         <div class="card">
-            <h2>Request History</h2>
-
-            <div class="inline-form" style="margin-bottom:12px;">
-                <div class="field" style="flex:1;max-width:300px;">
-                    <label for="historyProxyId">Proxy Identifier</label>
-                    <input type="text" id="historyProxyId" placeholder="my-proxy" />
-                </div>
-                <button class="btn btn-blue btn-sm" onclick="loadHistory()">Load History</button>
-                <button class="btn btn-red btn-sm" onclick="clearHistory()">Clear History</button>
-                <button class="btn btn-outline btn-sm" onclick="saveSnapshot()">Save Snapshot</button>
-                <button class="btn btn-outline btn-sm" onclick="loadAnalytics()">Analytics</button>
-                <button class="btn btn-outline btn-sm" onclick="checkProxyHealth()">Health</button>
-            </div>
-
-            <!-- History Filters (Feature 4) -->
-            <div class="history-filters">
-                <div><label>Method</label><br>
-                    <select id="historyFilterMethod">
-                        <option value="">All</option>
-                        <option value="GET">GET</option><option value="POST">POST</option>
-                        <option value="PUT">PUT</option><option value="PATCH">PATCH</option>
-                        <option value="DELETE">DELETE</option>
-                    </select>
-                </div>
-                <div><label>Endpoint</label><br>
-                    <input type="text" id="historyFilterEndpoint" placeholder="search..." style="width:140px;" />
-                </div>
-                <div><label>Source</label><br>
-                    <select id="historyFilterSource">
-                        <option value="">All</option>
-                        <option value="mock">mock</option><option value="forward">forward</option>
-                        <option value="redirect">redirect</option><option value="mock_miss">mock_miss</option>
-                    </select>
-                </div>
-                <div><label>Status Min</label><br>
-                    <input type="number" id="historyFilterStatusMin" placeholder="200" style="width:70px;" />
-                </div>
-                <div><label>Status Max</label><br>
-                    <input type="number" id="historyFilterStatusMax" placeholder="599" style="width:70px;" />
+            <div class="card-header">
+                <h2 class="icon-text"><span class="icon">&#128270;</span> Inspector</h2>
+                <div class="inline-form" style="gap:6px;">
+                    <input type="text" id="historyProxyId" placeholder="Proxy identifier..." style="width:220px;" />
                 </div>
             </div>
 
-            <div id="historyContainer">
-                <div class="empty-state">
-                    <p>Enter a proxy identifier and click Load History to view requests.</p>
+            <!-- Tab bar -->
+            <div class="tab-bar">
+                <div class="tab-bar-item active" onclick="switchManageTab('history',this)">
+                    History
+                </div>
+                <div class="tab-bar-item" onclick="switchManageTab('snapshots',this)">
+                    Snapshots
+                </div>
+                <div class="tab-bar-item" onclick="switchManageTab('analytics',this)">
+                    Analytics
+                </div>
+                <div class="tab-bar-item" onclick="switchManageTab('health',this)">
+                    Health
+                </div>
+                <div class="tab-bar-item" onclick="switchManageTab('storage',this)">
+                    Storage
                 </div>
             </div>
-        </div>
 
-        <!-- ================================================================ -->
-        <!-- State Snapshots (Feature 6)                                      -->
-        <!-- ================================================================ -->
-        <div class="card">
-            <h2>State Snapshots</h2>
-            <div id="snapshotsContainer">
-                <div class="empty-state"><p>Load history with a proxy identifier above to manage snapshots.</p></div>
+            <!-- History Tab -->
+            <div class="tab-panel active" id="tab-history">
+                <div class="inline-form" style="margin-bottom:12px;">
+                    <button class="btn btn-blue btn-sm" onclick="loadHistory()">Load History</button>
+                    <button class="btn btn-red btn-sm" onclick="clearHistory()">Clear</button>
+                </div>
+
+                <!-- History Filters -->
+                <div class="collapsible-header" onclick="this.classList.toggle('collapsed');document.getElementById('historyFilters').classList.toggle('collapsed')">
+                    <span class="chevron">&#9660;</span>
+                    <span style="font-size:0.78rem;font-weight:600;color:var(--text-secondary);">Filters</span>
+                </div>
+                <div id="historyFilters" class="collapsible-body">
+                    <div class="history-filters">
+                        <div><label>Method</label>
+                            <select id="historyFilterMethod">
+                                <option value="">All</option>
+                                <option value="GET">GET</option><option value="POST">POST</option>
+                                <option value="PUT">PUT</option><option value="PATCH">PATCH</option>
+                                <option value="DELETE">DELETE</option>
+                            </select>
+                        </div>
+                        <div><label>Endpoint</label>
+                            <input type="text" id="historyFilterEndpoint" placeholder="search..." style="width:140px;" />
+                        </div>
+                        <div><label>Source</label>
+                            <select id="historyFilterSource">
+                                <option value="">All</option>
+                                <option value="mock">mock</option><option value="forward">forward</option>
+                                <option value="redirect">redirect</option><option value="mock_miss">mock_miss</option>
+                            </select>
+                        </div>
+                        <div><label>Status</label>
+                            <div style="display:flex;gap:4px;">
+                                <input type="number" id="historyFilterStatusMin" placeholder="200" style="width:60px;" />
+                                <span style="color:var(--text-muted);line-height:2;">-</span>
+                                <input type="number" id="historyFilterStatusMax" placeholder="599" style="width:60px;" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="historyContainer">
+                    <div class="empty-state"><p>Enter a proxy identifier above and click Load History.</p></div>
+                </div>
             </div>
-        </div>
 
-        <!-- ================================================================ -->
-        <!-- Analytics (Feature 14)                                           -->
-        <!-- ================================================================ -->
-        <div class="card">
-            <h2>Analytics</h2>
-            <div id="analyticsContainer">
-                <div class="empty-state"><p>Click "Analytics" above to view request analytics.</p></div>
+            <!-- Snapshots Tab -->
+            <div class="tab-panel" id="tab-snapshots">
+                <div class="inline-form" style="margin-bottom:12px;">
+                    <button class="btn btn-blue btn-sm" onclick="saveSnapshot()">Save Snapshot</button>
+                    <button class="btn btn-outline btn-sm" onclick="loadSnapshots()">Refresh</button>
+                </div>
+                <div id="snapshotsContainer">
+                    <div class="empty-state"><p>Snapshots let you save and restore proxy state. Enter a proxy identifier above.</p></div>
+                </div>
             </div>
-        </div>
 
-        <!-- ================================================================ -->
-        <!-- Storage Management                                               -->
-        <!-- ================================================================ -->
-        <div class="card">
-            <h2>Storage</h2>
-            <div class="inline-form">
-                <button class="btn btn-outline btn-sm" onclick="loadStorageInfo()">Check Storage</button>
-                <button class="btn btn-red btn-sm" onclick="runCleanup()">Cleanup & Vacuum</button>
+            <!-- Analytics Tab -->
+            <div class="tab-panel" id="tab-analytics">
+                <div class="inline-form" style="margin-bottom:12px;">
+                    <button class="btn btn-blue btn-sm" onclick="loadAnalytics()">Load Analytics</button>
+                </div>
+                <div id="analyticsContainer">
+                    <div class="empty-state"><p>View request analytics for a proxy. Enter a proxy identifier above.</p></div>
+                </div>
+            </div>
+
+            <!-- Health Tab -->
+            <div class="tab-panel" id="tab-health">
+                <div class="inline-form" style="margin-bottom:12px;">
+                    <button class="btn btn-blue btn-sm" onclick="checkProxyHealth()">Check Health</button>
+                </div>
+                <div id="healthContainer">
+                    <div class="empty-state"><p>Check upstream health for a proxy. Enter a proxy identifier above.</p></div>
+                </div>
+            </div>
+
+            <!-- Storage Tab -->
+            <div class="tab-panel" id="tab-storage">
+                <div class="inline-form" style="margin-bottom:12px;">
+                    <button class="btn btn-outline btn-sm" onclick="loadStorageInfo()">Check Storage</button>
+                    <button class="btn btn-red btn-sm" onclick="runCleanup()">Cleanup &amp; Vacuum</button>
+                </div>
+                <div id="storageContainer">
+                    <div class="empty-state"><p>View database size and clean up old data.</p></div>
+                </div>
             </div>
         </div>
 
@@ -169,6 +204,9 @@
         <!-- ================================================================ -->
         <div id="mainResponse" class="response-box"></div>
 
+        <div class="page-footer">
+            PED Tools &mdash; Proxy, Mock &amp; JSON Workbench
+        </div>
     </div>
 
     <!-- ================================================================ -->
