@@ -727,6 +727,24 @@ function renderMocksTable(mocks) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Mock Search / Filter                                              */
+/* ------------------------------------------------------------------ */
+
+function filterMocksTable() {
+    var query = (document.getElementById('mockSearchInput') || {}).value || '';
+    query = query.trim().toLowerCase();
+    var rows = document.querySelectorAll('#mocksContainer table tbody tr');
+    rows.forEach(function(row) {
+        if (!row.id || !row.id.startsWith('mock-row-')) return;
+        var idx = parseInt(row.id.replace('mock-row-', ''));
+        var m = _loadedMocks[idx];
+        if (!m) { row.style.display = 'none'; return; }
+        var text = (m.endpoint + ' ' + m.method).toLowerCase();
+        row.style.display = (!query || text.indexOf(query) >= 0) ? '' : 'none';
+    });
+}
+
+/* ------------------------------------------------------------------ */
 /*  Bulk Delete (Feature 7 — UI)                                      */
 /* ------------------------------------------------------------------ */
 

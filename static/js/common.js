@@ -44,6 +44,14 @@ function copyResponse(btn) {
     setTimeout(() => btn.textContent = 'Copy', 1500);
 }
 
+/* --- Mobile menu --- */
+function toggleMobileMenu() {
+    var menu = document.getElementById('mobileMenu');
+    var overlay = document.getElementById('mobileOverlay');
+    if (menu) menu.classList.toggle('visible');
+    if (overlay) overlay.classList.toggle('visible');
+}
+
 function handleApiError(err) {
     if (err && err.status === 401) {
         showToast('Session expired. Please log in again.', 'error');

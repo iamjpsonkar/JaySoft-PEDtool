@@ -12,17 +12,33 @@
 <body>
     <div class="topbar">
         <h1>PED Tools</h1>
+        <span class="topbar-nav-links">
+            <a href="/" class="active">Home</a>
+            <a href="/proxy/">Mock Builder</a>
+            <a href="/proxy/helper">Docs</a>
+            {% if session.get('authenticated') %}
+            <a href="/proxy/manage/">Manage</a>
+            <a href="/suggestions/view/">Suggestions</a>
+            {% endif %}
+        </span>
+        <span class="nav-spacer"></span>
+        <span class="topbar-author">by Jay Prakash Sonkar</span>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+        <button class="topbar-hamburger" onclick="toggleMobileMenu()" aria-label="Menu">&#9776;</button>
+        {% if session.get('authenticated') %}
+        <a href="/logout">Logout</a>
+        {% else %}
+        <a href="/login">Login</a>
+        {% endif %}
+    </div>
+    <div class="mobile-menu-overlay" id="mobileOverlay" onclick="toggleMobileMenu()"></div>
+    <div class="mobile-menu" id="mobileMenu">
         <a href="/" class="active">Home</a>
         <a href="/proxy/">Mock Builder</a>
         <a href="/proxy/helper">Docs</a>
         {% if session.get('authenticated') %}
         <a href="/proxy/manage/">Manage</a>
         <a href="/suggestions/view/">Suggestions</a>
-        {% endif %}
-        <span class="nav-spacer"></span>
-        <span class="topbar-author">by Jay Prakash Sonkar</span>
-        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
-        {% if session.get('authenticated') %}
         <a href="/logout">Logout</a>
         {% else %}
         <a href="/login">Login</a>
@@ -30,31 +46,36 @@
     </div>
 
     <div class="toolbar">
-        <!-- Prettify / Minify group -->
+        <!-- Primary actions — always visible -->
         <div class="toolbar-group">
-            <input type="checkbox" id="processEscape" />
-            <label for="processEscape">Escapes</label>
             <button class="btn btn-blue" onclick="prettify()" data-tooltip="Ctrl+Enter">Prettify</button>
-            <button class="btn btn-outline" onclick="minifyJson()" data-tooltip="Compact JSON">Minify</button>
-            <button class="btn btn-outline" onclick="jsonView()" data-tooltip="Ctrl+Shift+V — Smart format any text">JSON View</button>
+            <button class="btn btn-outline" onclick="minifyJson()">Minify</button>
+            <button class="btn btn-outline" onclick="jsonView()" data-tooltip="Ctrl+Shift+V">JSON View</button>
+            <button class="btn btn-outline" onclick="jsonDiffTool()">Diff</button>
         </div>
 
-        <!-- JSON Tools group -->
-        <div class="toolbar-group">
-            <span class="toolbar-group-label">JSON</span>
-            <button class="btn btn-outline" onclick="jsonPathQuery()" data-tooltip="Extract by dot-path">Path</button>
-            <button class="btn btn-outline" onclick="jsonDiffTool()" data-tooltip="Input vs Output">Diff</button>
-            <button class="btn btn-outline" onclick="jsonSchemaValidate()" data-tooltip="Validate structure">Schema</button>
-            <button class="btn btn-outline" onclick="jsonTransform()" data-tooltip="Transform pipeline">Transform</button>
+        <!-- More JSON tools dropdown -->
+        <div class="toolbar-group toolbar-dropdown-wrap">
+            <button class="btn btn-outline" onclick="toggleToolDropdown()" id="moreToolsBtn">More &#9662;</button>
+            <div class="toolbar-dropdown" id="toolsDropdown">
+                <button onclick="jsonPathQuery();toggleToolDropdown()">Path Query</button>
+                <button onclick="jsonSchemaValidate();toggleToolDropdown()">Schema Validate</button>
+                <button onclick="jsonTransform();toggleToolDropdown()">Transform</button>
+                <div class="toolbar-dropdown-sep"></div>
+                <label class="toolbar-dropdown-check"><input type="checkbox" id="processEscape" /> Process Escapes</label>
+            </div>
         </div>
 
-        <!-- Encrypt/Decrypt group -->
+        <!-- Encrypt/Decrypt — inputs expand on click -->
         <div class="toolbar-group">
-            <span class="toolbar-group-label">AES</span>
-            <input type="text" id="encIv" placeholder="IV" />
-            <input type="text" id="secret" placeholder="Secret" />
-            <button class="btn btn-green" onclick="encryptData()" data-tooltip="Ctrl+Shift+E">Encrypt</button>
-            <button class="btn btn-blue" onclick="decryptData()" data-tooltip="Ctrl+Shift+D">Decrypt</button>
+            <button class="btn btn-green" onclick="showAesAndEncrypt()" data-tooltip="Ctrl+Shift+E">Encrypt</button>
+            <button class="btn btn-blue" onclick="showAesAndDecrypt()" data-tooltip="Ctrl+Shift+D">Decrypt</button>
+        </div>
+
+        <!-- AES inputs (hidden until Encrypt/Decrypt clicked) -->
+        <div class="toolbar-group toolbar-aes" id="aesInputs" style="display:none;">
+            <input type="text" id="encIv" placeholder="IV (or 'gringotts')" />
+            <input type="text" id="secret" placeholder="Secret (or 'gringotts')" />
         </div>
     </div>
 
@@ -64,18 +85,21 @@
             <div class="pane-header">
                 <span class="icon-text"><span class="icon">&#9998;</span> Panel A</span>
                 <div class="pane-actions">
-                    <button class="btn-sm" id="btnInputExpandAll" onclick="inputTreeExpandAll()" style="display:none;">Expand All</button>
-                    <button class="btn-sm" id="btnInputCollapseAll" onclick="inputTreeCollapseAll()" style="display:none;">Collapse All</button>
-                    <button class="btn-sm" id="btnInputViewToggle" onclick="toggleInputView()" style="display:none;">Text View</button>
-                    <button class="btn-sm" onclick="formatInput()" data-tooltip="Format JSON">Format</button>
+                    <button class="btn-sm" id="btnInputExpandAll" onclick="inputTreeExpandAll()" style="visibility:hidden;">Expand</button>
+                    <button class="btn-sm" id="btnInputCollapseAll" onclick="inputTreeCollapseAll()" style="visibility:hidden;">Collapse</button>
+                    <button class="btn-sm" id="btnInputViewToggle" onclick="toggleInputView()" style="visibility:hidden;">Text</button>
+                    <button class="btn-sm" onclick="formatInput()">Format</button>
                     <button class="btn-sm" onclick="copyInput()">Copy</button>
-                    <button class="btn-sm" onclick="pasteInput()">Paste</button>
-                    <button class="btn-sm" onclick="toggleFindReplace('A')" data-tooltip="Ctrl+F">Find</button>
-                    <button class="btn-sm" onclick="sortLines('A')" data-tooltip="Sort lines alphabetically">Sort</button>
-                    <button class="btn-sm" onclick="dedupLines('A')" data-tooltip="Remove duplicate lines">Dedup</button>
-                    <button class="btn-sm" onclick="wrapUnwrap('A')" data-tooltip="Wrap/unwrap in array">[ ]</button>
-                    <button class="btn-sm" onclick="moveToOutput()">To B &#8594;</button>
+                    <button class="btn-sm" onclick="toggleFindReplace('A')">Find</button>
                     <button class="btn-sm" onclick="clearInput()">Clear</button>
+                    <button class="btn-sm pane-more-btn" onclick="togglePaneMenu('A')">&#8943;</button>
+                    <div class="pane-overflow-menu" id="paneMenuA">
+                        <button onclick="pasteInput();togglePaneMenu('A')">Paste</button>
+                        <button onclick="sortLines('A');togglePaneMenu('A')">Sort Lines</button>
+                        <button onclick="dedupLines('A');togglePaneMenu('A')">Dedup Lines</button>
+                        <button onclick="wrapUnwrap('A');togglePaneMenu('A')">Wrap/Unwrap [ ]</button>
+                        <button onclick="moveToOutput();togglePaneMenu('A')">Move to Panel B</button>
+                    </div>
                 </div>
             </div>
             <!-- Find & Replace bar -->
@@ -100,18 +124,21 @@
             <div class="pane-header">
                 <span class="icon-text"><span class="icon">&#128221;</span> Panel B</span>
                 <div class="pane-actions">
-                    <button class="btn-sm" id="btnExpandAll" onclick="treeExpandAll()" style="display:none;">Expand All</button>
-                    <button class="btn-sm" id="btnCollapseAll" onclick="treeCollapseAll()" style="display:none;">Collapse All</button>
-                    <button class="btn-sm" id="btnViewToggle" onclick="toggleOutputView()" style="display:none;">Text View</button>
-                    <button class="btn-sm" onclick="formatOutput()" data-tooltip="Format JSON">Format</button>
+                    <button class="btn-sm" id="btnExpandAll" onclick="treeExpandAll()" style="visibility:hidden;">Expand</button>
+                    <button class="btn-sm" id="btnCollapseAll" onclick="treeCollapseAll()" style="visibility:hidden;">Collapse</button>
+                    <button class="btn-sm" id="btnViewToggle" onclick="toggleOutputView()" style="visibility:hidden;">Text</button>
+                    <button class="btn-sm" onclick="formatOutput()">Format</button>
                     <button class="btn-sm" onclick="copyOutput()">Copy</button>
-                    <button class="btn-sm" onclick="pasteOutput()">Paste</button>
-                    <button class="btn-sm" onclick="toggleFindReplace('B')" data-tooltip="Ctrl+F">Find</button>
-                    <button class="btn-sm" onclick="sortLines('B')" data-tooltip="Sort lines alphabetically">Sort</button>
-                    <button class="btn-sm" onclick="dedupLines('B')" data-tooltip="Remove duplicate lines">Dedup</button>
-                    <button class="btn-sm" onclick="wrapUnwrap('B')" data-tooltip="Wrap/unwrap in array">[ ]</button>
-                    <button class="btn-sm" onclick="moveToInput()">&#8592; To A</button>
+                    <button class="btn-sm" onclick="toggleFindReplace('B')">Find</button>
                     <button class="btn-sm" onclick="clearOutput()">Clear</button>
+                    <button class="btn-sm pane-more-btn" onclick="togglePaneMenu('B')">&#8943;</button>
+                    <div class="pane-overflow-menu" id="paneMenuB">
+                        <button onclick="pasteOutput();togglePaneMenu('B')">Paste</button>
+                        <button onclick="sortLines('B');togglePaneMenu('B')">Sort Lines</button>
+                        <button onclick="dedupLines('B');togglePaneMenu('B')">Dedup Lines</button>
+                        <button onclick="wrapUnwrap('B');togglePaneMenu('B')">Wrap/Unwrap [ ]</button>
+                        <button onclick="moveToInput();togglePaneMenu('B')">Move to Panel A</button>
+                    </div>
                 </div>
             </div>
             <!-- Find & Replace bar -->

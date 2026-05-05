@@ -263,12 +263,16 @@
         <div style="margin-top:24px;">
             <div class="card full">
                 <h2 class="icon-text"><span class="icon">&#128203;</span> Existing Mocks</h2>
-                <div class="field" style="max-width:450px;">
-                    <label for="mocks_proxy_id">Proxy Identifier</label>
-                    <div style="display:flex;gap:8px;">
+                <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px;">
+                    <div class="field" style="flex:0 0 200px;margin:0;">
+                        <label for="mocks_proxy_id">Proxy Identifier</label>
                         <input type="text" id="mocks_proxy_id" placeholder="my-proxy" />
-                        <button class="btn btn-blue btn-sm" onclick="loadMocks()">Load</button>
-                        <button class="btn btn-outline btn-sm" onclick="downloadPostman()" title="Download Postman collection">Postman</button>
+                    </div>
+                    <button class="btn btn-blue btn-sm" onclick="loadMocks()">Load</button>
+                    <button class="btn btn-outline btn-sm" onclick="downloadPostman()" title="Postman">Postman</button>
+                    <div class="field" style="flex:1;min-width:150px;margin:0;">
+                        <label for="mockSearchInput">Search</label>
+                        <input type="text" id="mockSearchInput" placeholder="Filter by endpoint..." oninput="filterMocksTable()" />
                     </div>
                 </div>
                 <div id="mocksContainer">

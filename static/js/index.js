@@ -147,11 +147,11 @@ function _showInputTreeView(data) {
     tree.innerHTML = _renderNode(data, null, false, 0);
     tree.style.display = 'block';
     inputEl.style.display = 'none';
-    document.getElementById('btnInputExpandAll').style.display = '';
-    document.getElementById('btnInputCollapseAll').style.display = '';
+    document.getElementById('btnInputExpandAll').style.visibility = 'visible';
+    document.getElementById('btnInputCollapseAll').style.visibility = 'visible';
     var toggle = document.getElementById('btnInputViewToggle');
-    toggle.style.display = '';
-    toggle.textContent = 'Text View';
+    toggle.style.visibility = 'visible';
+    toggle.textContent = 'Text';
 }
 
 function showInputTextView() {
@@ -159,14 +159,14 @@ function showInputTextView() {
     var tree = document.getElementById('inputTreeView');
     tree.style.display = 'none';
     inputEl.style.display = '';
-    document.getElementById('btnInputExpandAll').style.display = 'none';
-    document.getElementById('btnInputCollapseAll').style.display = 'none';
+    document.getElementById('btnInputExpandAll').style.visibility = 'hidden';
+    document.getElementById('btnInputCollapseAll').style.visibility = 'hidden';
     var toggle = document.getElementById('btnInputViewToggle');
     if (_inputIsJson) {
-        toggle.style.display = '';
-        toggle.textContent = 'Object View';
+        toggle.style.visibility = 'visible';
+        toggle.textContent = 'Tree';
     } else {
-        toggle.style.display = 'none';
+        toggle.style.visibility = 'hidden';
     }
 }
 
@@ -391,11 +391,11 @@ function _showTreeView(data) {
     tree.innerHTML = _renderNode(data, null, false, 0);
     tree.style.display = 'block';
     editor.style.display = 'none';
-    document.getElementById('btnExpandAll').style.display = '';
-    document.getElementById('btnCollapseAll').style.display = '';
+    document.getElementById('btnExpandAll').style.visibility = 'visible';
+    document.getElementById('btnCollapseAll').style.visibility = 'visible';
     var toggle = document.getElementById('btnViewToggle');
-    toggle.style.display = '';
-    toggle.textContent = 'Text View';
+    toggle.style.visibility = 'visible';
+    toggle.textContent = 'Text';
 }
 
 function showTextView() {
@@ -404,15 +404,14 @@ function showTextView() {
     var editor = document.getElementById('outputEditor');
     tree.style.display = 'none';
     editor.style.display = '';
-    document.getElementById('btnExpandAll').style.display = 'none';
-    document.getElementById('btnCollapseAll').style.display = 'none';
+    document.getElementById('btnExpandAll').style.visibility = 'hidden';
+    document.getElementById('btnCollapseAll').style.visibility = 'hidden';
     var toggle = document.getElementById('btnViewToggle');
     if (_outputIsJson) {
-        // Output is JSON — keep the button visible so user can switch back to tree
-        toggle.style.display = '';
-        toggle.textContent = 'Object View';
+        toggle.style.visibility = 'visible';
+        toggle.textContent = 'Tree';
     } else {
-        toggle.style.display = 'none';
+        toggle.style.visibility = 'hidden';
     }
 }
 
@@ -959,6 +958,43 @@ function wrapUnwrap(panel) {
     }
     if (panel === 'A') updateInputStats(); else updateOutputStats();
     showToast('Wrapped in array', 'success');
+}
+
+/* --- Pane overflow menu --- */
+function togglePaneMenu(panel) {
+    var menu = document.getElementById('paneMenu' + panel);
+    menu.classList.toggle('visible');
+}
+// Close pane menus on outside click
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.pane-more-btn') && !e.target.closest('.pane-overflow-menu')) {
+        document.querySelectorAll('.pane-overflow-menu.visible').forEach(function(m) { m.classList.remove('visible'); });
+    }
+});
+
+/* --- Toolbar dropdown + AES reveal --- */
+function toggleToolDropdown() {
+    document.getElementById('toolsDropdown').classList.toggle('visible');
+}
+// Close dropdown when clicking outside
+document.addEventListener('click', function(e) {
+    var dd = document.getElementById('toolsDropdown');
+    if (dd && dd.classList.contains('visible') && !e.target.closest('.toolbar-dropdown-wrap')) {
+        dd.classList.remove('visible');
+    }
+});
+
+function showAesAndEncrypt() {
+    document.getElementById('aesInputs').style.display = 'flex';
+    var iv = document.getElementById('encIv').value.trim();
+    var secret = document.getElementById('secret').value.trim();
+    if (iv && secret) { encryptData(); } else { document.getElementById('encIv').focus(); }
+}
+function showAesAndDecrypt() {
+    document.getElementById('aesInputs').style.display = 'flex';
+    var iv = document.getElementById('encIv').value.trim();
+    var secret = document.getElementById('secret').value.trim();
+    if (iv && secret) { decryptData(); } else { document.getElementById('encIv').focus(); }
 }
 
 /* --- Suggestion Box --- */

@@ -35,16 +35,47 @@ body { display: flex; flex-direction: column; }
     transition: background var(--transition), border-color var(--transition);
 }
 
-.toolbar-group-label {
-    font-size: 0.68rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-muted);
-    padding-right: 4px;
-    border-right: 1px solid var(--border);
-    margin-right: 2px;
+/* Toolbar dropdown */
+.toolbar-dropdown-wrap { position: relative; }
+.toolbar-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    z-index: 100;
+    min-width: 180px;
+    padding: 4px 0;
+    animation: fadeSlideIn 0.15s ease;
 }
+.toolbar-dropdown.visible { display: block; }
+.toolbar-dropdown button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 7px 14px;
+    border: none;
+    background: none;
+    font-size: 0.8rem;
+    font-family: var(--font);
+    color: var(--text);
+    cursor: pointer;
+    transition: background var(--transition);
+}
+.toolbar-dropdown button:hover { background: var(--primary-light); color: var(--primary); }
+.toolbar-dropdown-sep { height: 1px; background: var(--border); margin: 4px 0; }
+.toolbar-dropdown-check {
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 14px; font-size: 0.8rem; cursor: pointer;
+    margin: 0; font-weight: 500; color: var(--text-secondary);
+}
+.toolbar-dropdown-check input { margin: 0; accent-color: var(--primary); }
+
+/* AES inputs group */
+.toolbar-aes input { width: 110px; }
 
 .toolbar label {
     font-size: 0.78rem;
@@ -237,6 +268,39 @@ textarea.editor:focus {
     font-size: 0.6rem;
     padding: 1px 4px;
 }
+
+/* --- Pane overflow menu --- */
+.pane-actions { position: relative; }
+.pane-more-btn { font-size: 1rem !important; padding: 2px 6px !important; line-height: 1; }
+.pane-overflow-menu {
+    display: none;
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    z-index: 50;
+    min-width: 160px;
+    padding: 4px 0;
+    animation: fadeSlideIn 0.15s ease;
+}
+.pane-overflow-menu.visible { display: block; }
+.pane-overflow-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 6px 14px;
+    border: none;
+    background: none;
+    font-size: 0.78rem;
+    font-family: var(--font);
+    color: var(--text);
+    cursor: pointer;
+    transition: background var(--transition);
+}
+.pane-overflow-menu button:hover { background: var(--primary-light); color: var(--primary); }
 
 /* --- Find & Replace bar --- */
 .find-replace-bar {
