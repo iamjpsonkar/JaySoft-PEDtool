@@ -67,6 +67,9 @@
                 <li><a href="#ep-list">GET /proxy/list/</a> &mdash; List all proxies with mock counts</li>
                 <li><a href="#ep-clone">POST /proxy/clone/</a> &mdash; Clone a proxy</li>
                 <li><a href="#ep-mock-delete">POST /proxy/mock/delete/</a> &mdash; Delete a specific mock</li>
+                <li><a href="#ep-mock-batch">POST /proxy/mock/batch/</a> &mdash; Batch create/delete mocks</li>
+                <li><a href="#ep-mock-validate">POST /proxy/mock/validate/</a> &mdash; Validate &amp; dry-run a mock</li>
+                <li><a href="#ep-mock-tags">POST /proxy/mock/tags/</a> &mdash; Set tags on a mock</li>
                 <li><a href="#ep-sequence-reset">POST /proxy/sequence/reset/</a> &mdash; Reset sequence counters</li>
             </ul>
 
@@ -79,8 +82,10 @@
 
             <h3>History &amp; Monitoring</h3>
             <ul class="toc">
-                <li><a href="#ep-history">GET /proxy/history/&lt;identifier&gt;/</a> &mdash; Get request history</li>
+                <li><a href="#ep-history">GET /proxy/history/&lt;identifier&gt;/</a> &mdash; Get request history (with filters)</li>
                 <li><a href="#ep-history-clear">POST /proxy/history/&lt;identifier&gt;/clear/</a> &mdash; Clear request history</li>
+                <li><a href="#ep-analytics">GET /proxy/analytics/&lt;identifier&gt;/</a> &mdash; Request analytics dashboard</li>
+                <li><a href="#ep-proxy-health">GET /proxy/health/&lt;identifier&gt;/</a> &mdash; Upstream health check</li>
                 <li><a href="#ep-ratelimit">GET /proxy/ratelimit/&lt;identifier&gt;/</a> &mdash; Get rate limit status</li>
                 <li><a href="#ep-health">GET /health</a> &mdash; Health check</li>
             </ul>
@@ -88,22 +93,37 @@
             <h3>State &amp; Storage</h3>
             <ul class="toc">
                 <li><a href="#state-api">State API (CRUD)</a> &mdash; Read, write, merge, clear per-proxy state</li>
+                <li><a href="#ep-snapshots">State Snapshots</a> &mdash; Save, list, restore, delete state snapshots</li>
                 <li><a href="#state-store">_store (Write)</a> &mdash; Write to state from mock responses</li>
                 <li><a href="#state-dbget">dbget (Read)</a> &mdash; Read state values in responses</li>
                 <li><a href="#state-staging">Staging Pattern</a> &mdash; Generate ID, store data, return in response</li>
                 <li><a href="#state-recipes">Recipes</a> &mdash; Login, wallet, orders, gift cards</li>
+                <li><a href="#ep-storage">Storage Management</a> &mdash; Check size, cleanup old data, vacuum DB</li>
             </ul>
 
             <h3>Advanced Features</h3>
             <ul class="toc">
                 <li><a href="#placeholders">Dynamic Placeholders Reference</a></li>
                 <li><a href="#patterns">URL Pattern Matching</a></li>
-                <li><a href="#feat-delay">Response Delay</a></li>
+                <li><a href="#feat-delay">Response Delay &amp; Latency Profiles</a></li>
                 <li><a href="#feat-status">Custom Status Codes</a></li>
                 <li><a href="#feat-sequence">Mock Sequencing</a></li>
                 <li><a href="#feat-conditionals">Mock Conditionals</a></li>
+                <li><a href="#feat-callback">Webhook / Callback Simulation</a></li>
+                <li><a href="#feat-caching">Mock Response Caching</a></li>
+                <li><a href="#feat-cors">CORS Headers</a></li>
+                <li><a href="#feat-envget">Environment Variable Resolver</a></li>
+                <li><a href="#feat-inheritance">Mock Inheritance / Proxy Chaining</a></li>
+                <li><a href="#feat-transforms">Request/Response Transforms</a></li>
+                <li><a href="#feat-templates">Mock Templates</a></li>
                 <li><a href="#feat-ratelimit">Rate Limiting</a></li>
                 <li><a href="#feat-history">Request History</a></li>
+            </ul>
+
+            <h3>JSON Tools</h3>
+            <ul class="toc">
+                <li><a href="#json-viewer">JSON Viewer</a> &mdash; Interactive tree view with collapsible nodes</li>
+                <li><a href="#json-tools">JSON Endpoints</a> &mdash; Prettify, Minify, Diff, Path Query, Schema Validate, Transform</li>
             </ul>
         </div>
 
@@ -1344,6 +1364,305 @@ curl http://localhost:8000/proxy/payments-v2/orders/123/status</pre>
             <div class="note">
                 <strong>Endpoints:</strong> Use <a href="#ep-history">GET /proxy/history/&lt;identifier&gt;/</a> to retrieve history and <a href="#ep-history-clear">POST /proxy/history/&lt;identifier&gt;/clear/</a> to clear it.
             </div>
+        </div>
+
+        <!-- ================================================================ -->
+        <!-- New Features Documentation                                       -->
+        <!-- ================================================================ -->
+
+        <!-- Webhook / Callback -->
+        <div class="card" id="feat-callback">
+            <h2>Webhook / Callback Simulation</h2>
+            <p>Add a <code>_callback</code> key to any mock response to fire an async HTTP request after responding. Useful for simulating payment webhooks, order status callbacks, etc.</p>
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>{
+  "status": "ok",
+  "order_id": "digit(8)",
+  "_callback": {
+    "url": "https://your-app.com/webhooks/payment",
+    "method": "POST",
+    "delay_ms": 3000,
+    "headers": {"X-Webhook-Secret": "abc123"},
+    "body": {
+      "event": "payment.success",
+      "order_id": "dbget(lastOrderId)",
+      "amount": "jsonget(amount)"
+    }
+  }
+}</pre>
+            <table class="ref-table">
+                <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+                <tr><td><code>url</code></td><td>string</td><td>Callback URL (must pass domain allowlist)</td></tr>
+                <tr><td><code>method</code></td><td>string</td><td>HTTP method (default: POST)</td></tr>
+                <tr><td><code>delay_ms</code></td><td>number</td><td>Delay before firing (default: 2000, max: 30000)</td></tr>
+                <tr><td><code>headers</code></td><td>object</td><td>Custom headers for the callback</td></tr>
+                <tr><td><code>body</code></td><td>object</td><td>Callback payload (resolvers like dbget/jsonget work inside)</td></tr>
+            </table>
+        </div>
+
+        <!-- Latency Profiles -->
+        <div class="card" id="feat-delay-profiles">
+            <h2>Latency Simulation Profiles</h2>
+            <p>Use <code>_delay_profile</code> instead of <code>_delay_ms</code> for randomized latency. All delays capped at 30,000ms.</p>
+            <table class="ref-table">
+                <tr><th>Profile</th><th>Example</th><th>Description</th></tr>
+                <tr><td><code>uniform(min, max)</code></td><td><code>"_delay_profile": "uniform(100, 500)"</code></td><td>Random delay between min and max ms</td></tr>
+                <tr><td><code>normal(mean, stddev)</code></td><td><code>"_delay_profile": "normal(200, 50)"</code></td><td>Normal distribution around mean</td></tr>
+                <tr><td><code>spike(base, spike, pct)</code></td><td><code>"_delay_profile": "spike(50, 2000, 10)"</code></td><td>base ms normally, spike ms at pct% of the time</td></tr>
+            </table>
+        </div>
+
+        <!-- CORS -->
+        <div class="card" id="feat-cors">
+            <h2>CORS Headers</h2>
+            <p>Enable CORS to allow browser-based clients to call the proxy directly.</p>
+            <table class="ref-table">
+                <tr><th>Method</th><th>Description</th></tr>
+                <tr><td>Set <code>PED_CORS_ORIGINS</code> env var</td><td>Comma-separated origins, or <code>*</code> for all. Empty = disabled.</td></tr>
+                <tr><td>Set state key <code>_cors_origins</code></td><td>Per-proxy override: <code>PATCH /proxy/state/&lt;id&gt;/ {"_cors_origins": "*"}</code></td></tr>
+            </table>
+            <p>OPTIONS preflight requests return 204 automatically. Headers set: <code>Access-Control-Allow-Origin</code>, <code>Allow-Methods</code>, <code>Allow-Headers</code>, <code>Max-Age</code>.</p>
+        </div>
+
+        <!-- envget -->
+        <div class="card" id="feat-envget">
+            <h2>Environment Variable Resolver</h2>
+            <p>Access server environment variables in mock responses with <code>envget(VAR_NAME, default)</code>.</p>
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>{
+  "api_key": "envget(MOCK_API_KEY, test-key-123)",
+  "base_url": "envget(MOCK_BASE_URL, https://staging.example.com)"
+}</pre>
+            <div class="note">
+                <strong>Security:</strong> Only env vars starting with <code>PED_MOCK_ENV_PREFIX</code> (default: <code>MOCK_</code>) are accessible. All others are blocked.
+            </div>
+        </div>
+
+        <!-- Mock Inheritance -->
+        <div class="card" id="feat-inheritance">
+            <h2>Mock Inheritance / Proxy Chaining</h2>
+            <p>Set <code>_parent_proxy</code> in a proxy's state to inherit mocks from a parent proxy. Child mocks override parent mocks on conflict.</p>
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>// Set parent: child inherits all mocks from "shared-auth"
+PATCH /proxy/state/my-proxy/ {"_parent_proxy": "shared-auth"}</pre>
+            <p>Use this to share common auth/login mocks across multiple proxies without duplicating them.</p>
+        </div>
+
+        <!-- Request/Response Transforms -->
+        <div class="card" id="feat-transforms">
+            <h2>Request/Response Transforms</h2>
+            <p>Modify forwarded requests or responses without full mocks using state keys.</p>
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>PATCH /proxy/state/my-proxy/
+{
+  "_request_transforms": {
+    "add_headers": {"X-Custom-Header": "injected-value"}
+  },
+  "_response_transforms": {
+    "add_headers": {"X-Debug": "true"}
+  }
+}</pre>
+            <p>Headers in <code>add_headers</code> are injected into all forwarded requests/responses for this proxy.</p>
+        </div>
+
+        <!-- Mock Response Caching -->
+        <div class="card" id="feat-caching">
+            <h2>Mock Response Caching</h2>
+            <p>Add <code>_cache_ttl</code> (in seconds) to a mock response to cache the resolved output in memory. Cached responses skip resolver evaluation on subsequent hits.</p>
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>{
+  "data": "snippet(some_expensive_expression())",
+  "_cache_ttl": 60
+}</pre>
+            <p>Cache is in-memory, keyed by proxy+endpoint+method+query_params. Max entries controlled by <code>PED_MOCK_CACHE_MAX</code> (default: 200). LRU eviction when full.</p>
+        </div>
+
+        <!-- Batch Mock Operations -->
+        <div class="card" id="ep-mock-batch">
+            <h2>Batch Mock Operations</h2>
+            <p><code>POST /proxy/mock/batch/</code> &mdash; Create or delete multiple mocks in a single request.</p>
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>{
+  "proxy_identifier": "my-proxy",
+  "operations": [
+    {"action": "create", "end_point": "/users", "method": "GET", "mock": {"users": []}},
+    {"action": "create", "end_point": "/health", "method": "GET", "mock": {"status": "ok"}},
+    {"action": "delete", "end_point": "/old-endpoint", "method": "POST"}
+  ]
+}</pre>
+        </div>
+
+        <!-- Mock Validation -->
+        <div class="card" id="ep-mock-validate">
+            <h2>Mock Validation &amp; Dry-Run</h2>
+            <p><code>POST /proxy/mock/validate/</code> &mdash; Validate a mock payload without deploying it. Optionally pass a test request to see the resolved output.</p>
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>{
+  "mock": {"greeting": "Hello, jsonget(name)!"},
+  "proxy_identifier": "my-proxy",
+  "test_request": {
+    "method": "POST",
+    "body": {"name": "Alice"},
+    "headers": {},
+    "params": {}
+  }
+}</pre>
+            <p>Returns <code>{"valid": true, "resolved_output": {"greeting": "Hello, Alice!"}}</code></p>
+        </div>
+
+        <!-- Mock Tags -->
+        <div class="card" id="ep-mock-tags">
+            <h2>Mock Tagging</h2>
+            <p><code>POST /proxy/mock/tags/</code> &mdash; Add tags to mocks for organization and filtering.</p>
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>{
+  "proxy_identifier": "my-proxy",
+  "end_point": "/users",
+  "method": "GET",
+  "tags": ["auth", "v2", "stable"]
+}
+
+// Filter mocks by tag:
+GET /proxy/mocks/my-proxy/?tag=auth</pre>
+        </div>
+
+        <!-- Snapshots -->
+        <div class="card" id="ep-snapshots">
+            <h2>State Snapshots</h2>
+            <p>Save and restore proxy state for repeatable test runs.</p>
+            <table class="ref-table">
+                <tr><th>Endpoint</th><th>Method</th><th>Description</th></tr>
+                <tr><td><code>/proxy/state/&lt;id&gt;/snapshot/</code></td><td>POST</td><td>Save current state as a named snapshot</td></tr>
+                <tr><td><code>/proxy/state/&lt;id&gt;/snapshots/</code></td><td>GET</td><td>List all snapshots for a proxy</td></tr>
+                <tr><td><code>/proxy/state/restore/&lt;snap_id&gt;/</code></td><td>POST</td><td>Restore state from a snapshot</td></tr>
+                <tr><td><code>/proxy/state/snapshot/&lt;snap_id&gt;/</code></td><td>DELETE</td><td>Delete a snapshot</td></tr>
+            </table>
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>// Save a snapshot
+POST /proxy/state/my-proxy/snapshot/  {"name": "before-test-run"}
+
+// List snapshots
+GET /proxy/state/my-proxy/snapshots/
+
+// Restore
+POST /proxy/state/restore/42/</pre>
+            <div class="note">Max 20 snapshots per proxy (configurable via <code>PED_MAX_SNAPSHOTS</code>). Oldest auto-deleted when limit reached.</div>
+        </div>
+
+        <!-- Analytics -->
+        <div class="card" id="ep-analytics">
+            <h2>Mock Analytics</h2>
+            <p><code>GET /proxy/analytics/&lt;identifier&gt;/</code> &mdash; Aggregated request statistics from history.</p>
+            <p>Returns: total requests, breakdown by source/method, avg latency, error rate, top endpoints, and stale mocks (registered but never hit).</p>
+        </div>
+
+        <!-- Proxy Health -->
+        <div class="card" id="ep-proxy-health">
+            <h2>Proxy Health Check</h2>
+            <p><code>GET /proxy/health/&lt;identifier&gt;/</code> &mdash; Pings the upstream domain and returns connectivity status, latency, mock count, and history count.</p>
+            <p>Status values: <code>healthy</code> (&lt;400), <code>degraded</code> (4xx), <code>unhealthy</code> (5xx or timeout).</p>
+        </div>
+
+        <!-- Storage -->
+        <div class="card" id="ep-storage">
+            <h2>Storage Management</h2>
+            <p>Monitor and optimize database storage usage.</p>
+            <table class="ref-table">
+                <tr><th>Endpoint</th><th>Method</th><th>Description</th></tr>
+                <tr><td><code>/proxy/storage/</code></td><td>GET</td><td>DB size, row counts per table</td></tr>
+                <tr><td><code>/proxy/storage/cleanup/</code></td><td>POST</td><td>Delete old history + orphaned snapshots + VACUUM</td></tr>
+            </table>
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>// Cleanup: delete history older than 3 days and vacuum
+POST /proxy/storage/cleanup/  {"keep_days": 3, "vacuum": true}</pre>
+        </div>
+
+        <!-- Mock Templates -->
+        <div class="card" id="feat-templates">
+            <h2>Mock Templates</h2>
+            <p>Save reusable mock patterns as templates. Available via the template dropdown in the Mock Builder UI.</p>
+            <table class="ref-table">
+                <tr><th>Endpoint</th><th>Method</th><th>Description</th></tr>
+                <tr><td><code>/proxy/templates/</code></td><td>GET</td><td>List all templates</td></tr>
+                <tr><td><code>/proxy/templates/&lt;id&gt;/</code></td><td>GET</td><td>Get template by ID</td></tr>
+                <tr><td><code>/proxy/templates/</code></td><td>POST</td><td>Create or update a template (auth required)</td></tr>
+                <tr><td><code>/proxy/templates/&lt;id&gt;/</code></td><td>DELETE</td><td>Delete a template (auth required)</td></tr>
+            </table>
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>POST /proxy/templates/
+{
+  "name": "Login + Token",
+  "category": "auth",
+  "description": "Login mock that stores tokens in state",
+  "template": {
+    "status": "success",
+    "accessToken": "alnum(16,16)",
+    "_store": [{"path": "tokens.jsonget(username).accessToken", "value": "alnum(16,16)"}]
+  }
+}</pre>
+        </div>
+
+        <!-- History Filters -->
+        <div class="card" id="feat-history-filters">
+            <h2>History Filtering</h2>
+            <p>The <a href="#ep-history">GET /proxy/history/&lt;identifier&gt;/</a> endpoint now supports query parameters for filtering:</p>
+            <table class="ref-table">
+                <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+                <tr><td><code>method</code></td><td>string</td><td>Filter by HTTP method (e.g. GET, POST)</td></tr>
+                <tr><td><code>endpoint</code></td><td>string</td><td>Substring search on endpoint path</td></tr>
+                <tr><td><code>status_min</code></td><td>int</td><td>Minimum response status code</td></tr>
+                <tr><td><code>status_max</code></td><td>int</td><td>Maximum response status code</td></tr>
+                <tr><td><code>source</code></td><td>string</td><td>Filter by source: mock, forward, redirect, mock_miss</td></tr>
+                <tr><td><code>since</code></td><td>string</td><td>ISO datetime — only entries after this time</td></tr>
+                <tr><td><code>until</code></td><td>string</td><td>ISO datetime — only entries before this time</td></tr>
+            </table>
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>// Show only POST errors
+GET /proxy/history/my-proxy/?method=POST&amp;status_min=400&amp;source=mock</pre>
+        </div>
+
+        <!-- JSON Viewer -->
+        <div class="card" id="json-viewer">
+            <h2>JSON Viewer (Interactive Tree)</h2>
+            <p>The Home page includes an interactive JSON tree viewer. Click <strong>JSON View</strong> (or press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd>) to render any JSON as a collapsible tree.</p>
+            <h3>Features</h3>
+            <ul>
+                <li><strong>Collapsible nodes</strong> &mdash; click arrows to expand/collapse objects and arrays</li>
+                <li><strong>Auto-collapse</strong> &mdash; nodes deeper than 3 levels start collapsed</li>
+                <li><strong>Color-coded types</strong> &mdash; <span style="color:#059669;">strings</span>, <span style="color:#2563eb;">numbers</span>, <span style="color:#d97706;">booleans</span>, <span style="color:#ef4444;font-style:italic;">null</span></li>
+                <li><strong>Click-to-copy</strong> &mdash; click any value to copy it to clipboard</li>
+                <li><strong>Type tags</strong> &mdash; hover any row to see its type</li>
+                <li><strong>Expand All / Collapse All</strong> buttons</li>
+                <li><strong>Toggle</strong> &mdash; switch between <strong>Object View</strong> (tree) and <strong>Text View</strong> (raw JSON)</li>
+            </ul>
+            <h3>Smart parser</h3>
+            <p>The viewer auto-corrects common JSON issues:</p>
+            <ul>
+                <li>Python literals: <code>True</code>, <code>False</code>, <code>None</code> &rarr; <code>true</code>, <code>false</code>, <code>null</code></li>
+                <li>Single quotes: <code>{'key': 'val'}</code> &rarr; <code>{"key": "val"}</code></li>
+                <li>Missing colons: <code>{"hi" true}</code> &rarr; <code>{"hi": true}</code></li>
+                <li>Trailing commas: <code>[1, 2, 3,]</code> &rarr; <code>[1, 2, 3]</code></li>
+                <li>Unquoted keys: <code>{name: "Alice"}</code> &rarr; <code>{"name": "Alice"}</code></li>
+                <li>Wrapping quotes: <code>'{"a": 1}'</code> &rarr; <code>{"a": 1}</code></li>
+            </ul>
+        </div>
+
+        <!-- JSON Tools -->
+        <div class="card" id="json-tools">
+            <h2>JSON Tool Endpoints</h2>
+            <p>Backend endpoints available on the Home page toolbar and via direct API calls:</p>
+            <table class="ref-table">
+                <tr><th>Endpoint</th><th>Description</th></tr>
+                <tr><td><code>POST /ped/prettify</code></td><td>Format JSON with indentation. Supports escape processing.</td></tr>
+                <tr><td><code>POST /ped/minify</code></td><td>Compact JSON (strip whitespace). Returns original/minified length.</td></tr>
+                <tr><td><code>POST /ped/jsonpath</code></td><td>Extract values by dot-path. Accepts single <code>path</code> or multiple <code>paths</code>.</td></tr>
+                <tr><td><code>POST /ped/diff</code></td><td>Structural diff of two JSON documents (<code>a</code> vs <code>b</code>). Returns change list.</td></tr>
+                <tr><td><code>POST /ped/validate-schema</code></td><td>Validate <code>data</code> against a JSON Schema (<code>schema</code>). Supports type, required, properties, items, enum, min/max, pattern.</td></tr>
+                <tr><td><code>POST /ped/transform</code></td><td>Pipeline of operations: pick, omit, rename, set, delete, flatten, unflatten, wrap, unwrap, sort_keys, defaults, map.</td></tr>
+            </table>
+            <h3>Transform Operations Reference</h3>
+            <pre><button class="copy-btn" onclick="copyBlock(this)">Copy</button>POST /ped/transform
+{
+  "data": {"name": "Alice", "password": "secret", "age": 30},
+  "operations": [
+    {"op": "omit", "fields": ["password"]},
+    {"op": "set", "path": "meta.processed", "value": true},
+    {"op": "sort_keys"}
+  ]
+}
+// Result: {"age": 30, "meta": {"processed": true}, "name": "Alice"}</pre>
+        </div>
+
+        <div class="page-footer">
+            PED Tools &mdash; Proxy, Mock &amp; JSON Workbench
         </div>
     </div>
 

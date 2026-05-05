@@ -512,6 +512,36 @@ Common log prefixes:
 
 ## 23. Changelog (recent)
 
+### 2026-05-05 — Documentation update for all new features
+
+**File changed:** `templates/proxy_helper.html`, `context.md`
+
+Updated the API Documentation (Docs) page with documentation for all features added since the last docs update:
+
+**New TOC entries added:** Batch Ops, Validate, Tags (Management); Analytics, Proxy Health (History & Monitoring); Snapshots, Storage Management (State & Storage); Callbacks, Caching, CORS, envget, Inheritance, Transforms, Templates, Latency Profiles (Advanced); JSON Viewer, JSON Endpoints (JSON Tools).
+
+**New documentation sections (15):**
+- Webhook / Callback Simulation (`_callback` key, full field reference)
+- Latency Simulation Profiles (`uniform`, `normal`, `spike`)
+- CORS Headers (`PED_CORS_ORIGINS`, per-proxy `_cors_origins`)
+- Environment Variable Resolver (`envget()`, prefix restriction)
+- Mock Inheritance (`_parent_proxy` state key)
+- Request/Response Transforms (`_request_transforms`, `_response_transforms`)
+- Mock Response Caching (`_cache_ttl`, LRU)
+- Batch Mock Operations (`POST /proxy/mock/batch/`)
+- Mock Validation & Dry-Run (`POST /proxy/mock/validate/`)
+- Mock Tagging (`POST /proxy/mock/tags/`, filter by tag)
+- State Snapshots (save/list/restore/delete)
+- Mock Analytics (`GET /proxy/analytics/<id>/`)
+- Proxy Health Check (`GET /proxy/health/<id>/`)
+- Storage Management (check size, cleanup, vacuum)
+- Mock Templates (CRUD endpoints)
+- History Filtering (7 query parameters)
+- JSON Viewer (interactive tree: features, smart parser corrections)
+- JSON Tool Endpoints (prettify, minify, jsonpath, diff, validate-schema, transform with ops reference)
+
+---
+
 ### 2026-05-05 — Interactive JSON Tree Viewer
 
 **Files changed:** `static/js/index.js`, `static/css/index.css`, `templates/index.html`, `context.md`
