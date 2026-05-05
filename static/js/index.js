@@ -23,6 +23,8 @@ inputEl.addEventListener('input', updateInputStats);
 function setOutput(text) {
     outputEl.value = text;
     updateOutputStats();
+    // Always switch back to text view so the textarea is visible
+    showTextView();
 }
 
 /* --- API helper --- */
