@@ -48,7 +48,7 @@ function formatInput() {
 }
 
 function clearInput() { inputEl.value = ''; updateInputStats(); }
-function clearOutput() { setOutput(''); }
+function clearOutput() { setOutput(''); showTextView(); }
 
 async function pasteInput() {
     try {
@@ -110,44 +110,29 @@ async function minifyJson() {
     } catch (e) { showToast('Request failed', 'error'); }
 }
 
-/* --- JSON Viewer (smart format — handles non-JSON too) --- */
-function jsonView() {
-    const raw = inputEl.value.trim();
-    if (!raw) { showToast('Input is empty', 'error'); return; }
-
-    // Strip wrapping quotes/backticks that sometimes surround pasted JSON
+/* --- JSON smart parser (shared by jsonView and tree view) --- */
+function _smartParseJson(raw) {
+    // Strip wrapping quotes/backticks
     var cleaned = raw;
     if (/^['"`].*['"`]$/.test(cleaned) && cleaned.length >= 2) {
         var inner = cleaned.slice(1, -1);
-        // Only strip if the inner content looks like JSON (starts with { or [)
-        if (/^\s*[\[{]/.test(inner)) {
-            cleaned = inner;
-        }
+        if (/^\s*[\[{]/.test(inner)) cleaned = inner;
     }
 
-    // Try direct parse first (original, then stripped)
+    // Try direct parse
     var candidates = [raw];
     if (cleaned !== raw) candidates.push(cleaned);
     for (var ci = 0; ci < candidates.length; ci++) {
-        try {
-            var parsed = JSON.parse(candidates[ci]);
-            setOutput(JSON.stringify(parsed, null, 2));
-            showToast('Valid JSON — formatted', 'success');
-            return;
-        } catch (e) { /* not valid JSON, try recovery */ }
+        try { return { data: JSON.parse(candidates[ci]), corrected: false }; }
+        catch (e) { /* continue */ }
     }
 
-    // Use the stripped version for recovery attempts
-    raw = cleaned;
-
-    // Try extracting JSON from surrounding text
-    var result = '';
-    var found = 0;
+    var work = cleaned;
     var errors = [];
 
-    // Attempt 1: find embedded JSON objects/arrays
-    var braceStart = raw.indexOf('{');
-    var bracketStart = raw.indexOf('[');
+    // Attempt 1: extract embedded JSON
+    var braceStart = work.indexOf('{');
+    var bracketStart = work.indexOf('[');
     var starts = [];
     if (braceStart >= 0) starts.push(braceStart);
     if (bracketStart >= 0) starts.push(bracketStart);
@@ -155,13 +140,11 @@ function jsonView() {
 
     for (var s = 0; s < starts.length; s++) {
         var startIdx = starts[s];
-        var openChar = raw[startIdx];
+        var openChar = work[startIdx];
         var closeChar = openChar === '{' ? '}' : ']';
-        var depth = 0;
-        var inStr = false;
-        var escaped = false;
-        for (var i = startIdx; i < raw.length; i++) {
-            var ch = raw[i];
+        var depth = 0, inStr = false, escaped = false;
+        for (var i = startIdx; i < work.length; i++) {
+            var ch = work[i];
             if (escaped) { escaped = false; continue; }
             if (ch === '\\') { escaped = true; continue; }
             if (ch === '"') { inStr = !inStr; continue; }
@@ -169,62 +152,204 @@ function jsonView() {
             if (ch === openChar) depth++;
             if (ch === closeChar) depth--;
             if (depth === 0) {
-                var candidate = raw.substring(startIdx, i + 1);
                 try {
-                    var obj = JSON.parse(candidate);
-                    if (result) result += '\n\n';
-                    result += JSON.stringify(obj, null, 2);
-                    found++;
+                    return { data: JSON.parse(work.substring(startIdx, i + 1)), corrected: false };
                 } catch (e2) {
-                    errors.push('Failed to parse at position ' + startIdx + ': ' + e2.message);
+                    errors.push(e2.message);
                 }
                 break;
             }
         }
     }
 
-    // Attempt 2: try common fixes in multiple passes
-    if (found === 0) {
-        var fixed = raw;
-        // Pass 1: single quotes to double
-        fixed = fixed.replace(/'/g, '"');
-        // Pass 2: trailing commas before } or ]
-        fixed = fixed.replace(/,\s*([\]}])/g, '$1');
-        // Pass 3: unquoted keys  e.g.  {name: "val"}  or  , name: "val"
-        fixed = fixed.replace(/([{,])\s*(\w+)\s*:/g, '$1"$2":');
-        // Pass 4: Python literals  True/False/None -> true/false/null
-        fixed = fixed.replace(/\bTrue\b/g, 'true').replace(/\bFalse\b/g, 'false').replace(/\bNone\b/g, 'null');
-        // Pass 5: missing colon between "key" and value  e.g.  {"hi" true}
-        //   Matches: "..." <whitespace> <not-colon-or-comma-or-bracket>
-        fixed = fixed.replace(/(")\s+(?=["\d{\[tfn-])/g, '$1: ');
-        // Pass 6: unquoted keys without colons  e.g. {key1 null}
-        fixed = fixed.replace(/([{,])\s*([a-zA-Z_]\w*)\s+(?=["\d{\[tfn-])/g, '$1"$2": ');
-        // Pass 7: unquoted string values after colon  e.g. {"key": hello}
-        fixed = fixed.replace(/:\s*([a-zA-Z_]\w*)(\s*[,}\]])/g, function(m, val, after) {
-            if (/^(true|false|null)$/.test(val)) return m;
-            return ': "' + val + '"' + after;
-        });
-        try {
-            var obj2 = JSON.parse(fixed);
-            result = JSON.stringify(obj2, null, 2);
-            found = 1;
-            errors = ['Note: Input was not valid JSON but was auto-corrected'];
-        } catch (e3) {
-            errors.push('Auto-correction also failed: ' + e3.message);
-        }
+    // Attempt 2: auto-correct
+    var fixed = work;
+    fixed = fixed.replace(/'/g, '"');
+    fixed = fixed.replace(/,\s*([\]}])/g, '$1');
+    fixed = fixed.replace(/([{,])\s*(\w+)\s*:/g, '$1"$2":');
+    fixed = fixed.replace(/\bTrue\b/g, 'true').replace(/\bFalse\b/g, 'false').replace(/\bNone\b/g, 'null');
+    fixed = fixed.replace(/(")\s+(?=["\d{\[tfn-])/g, '$1: ');
+    fixed = fixed.replace(/([{,])\s*([a-zA-Z_]\w*)\s+(?=["\d{\[tfn-])/g, '$1"$2": ');
+    fixed = fixed.replace(/:\s*([a-zA-Z_]\w*)(\s*[,}\]])/g, function(m, val, after) {
+        if (/^(true|false|null)$/.test(val)) return m;
+        return ': "' + val + '"' + after;
+    });
+    try {
+        return { data: JSON.parse(fixed), corrected: true };
+    } catch (e3) {
+        errors.push(e3.message);
     }
 
-    if (found > 0) {
-        var header = '';
-        if (errors.length > 0) {
-            header = '// ' + errors.join('\n// ') + '\n\n';
-        }
-        setOutput(header + result);
-        showToast(found + ' JSON block(s) found and formatted', 'success');
+    return { data: null, errors: errors };
+}
+
+/* --- JSON View — renders interactive tree in output pane --- */
+function jsonView() {
+    const raw = inputEl.value.trim();
+    if (!raw) { showToast('Input is empty', 'error'); return; }
+
+    var result = _smartParseJson(raw);
+    if (result.data !== null && result.data !== undefined) {
+        // Also set text output for copy/move
+        setOutput(JSON.stringify(result.data, null, 2));
+        // Render tree
+        _showTreeView(result.data);
+        var msg = result.corrected ? 'Auto-corrected and rendered' : 'Valid JSON';
+        showToast(msg, 'success');
     } else {
-        setOutput('// Not valid JSON. Errors:\n// ' + errors.join('\n// ') + '\n\n// Raw input:\n' + raw);
+        showTextView();
+        setOutput('// Not valid JSON. Errors:\n// ' + (result.errors || []).join('\n// ') + '\n\n// Raw input:\n' + raw);
         showToast('Could not parse as JSON', 'error');
     }
+}
+
+/* --- Tree view rendering --- */
+var _treeViewData = null;
+
+function _showTreeView(data) {
+    _treeViewData = data;
+    var tree = document.getElementById('jsonTreeView');
+    var editor = document.getElementById('outputEditor');
+    tree.innerHTML = _renderNode(data, null, false, 0);
+    tree.style.display = 'block';
+    editor.style.display = 'none';
+    document.getElementById('btnExpandAll').style.display = '';
+    document.getElementById('btnCollapseAll').style.display = '';
+    document.getElementById('btnTextView').style.display = '';
+}
+
+function showTextView() {
+    var tree = document.getElementById('jsonTreeView');
+    var editor = document.getElementById('outputEditor');
+    tree.style.display = 'none';
+    editor.style.display = '';
+    document.getElementById('btnExpandAll').style.display = 'none';
+    document.getElementById('btnCollapseAll').style.display = 'none';
+    document.getElementById('btnTextView').style.display = 'none';
+}
+
+function _renderNode(val, key, isLast, depth) {
+    var type = _jsonType(val);
+    var comma = isLast ? '' : '<span class="jt-comma">,</span>';
+    var keyHtml = key !== null ? '<span class="jt-key">"' + _esc(key) + '"</span><span class="jt-colon">: </span>' : '';
+
+    if (type === 'object' || type === 'array') {
+        var isObj = type === 'object';
+        var entries = isObj ? Object.keys(val) : val;
+        var count = isObj ? Object.keys(val).length : val.length;
+        var open = isObj ? '{' : '[';
+        var close = isObj ? '}' : ']';
+        var autoCollapse = depth >= 3 && count > 0;
+        var id = 'jt-' + (++_jtCounter);
+
+        var html = '<div class="jt-node">';
+        html += '<div class="jt-row">';
+        if (count > 0) {
+            html += '<span class="jt-toggle' + (autoCollapse ? ' collapsed' : '') + '" onclick="_jtToggle(\'' + id + '\',this)" title="Click to expand/collapse">&#9660;</span>';
+        } else {
+            html += '<span class="jt-spacer"></span>';
+        }
+        html += keyHtml;
+        html += '<span class="jt-bracket">' + open + '</span>';
+        if (count > 0) {
+            html += '<span class="jt-summary" id="' + id + '-sum"' + (autoCollapse ? '' : ' style="display:none"') + '>' + count + (isObj ? ' keys' : ' items') + '</span>';
+        }
+        if (count === 0) {
+            html += '<span class="jt-bracket">' + close + '</span>' + comma;
+        }
+        html += '<span class="jt-type-tag">' + type + '</span>';
+        html += '</div>';
+
+        if (count > 0) {
+            html += '<div class="jt-children' + (autoCollapse ? ' collapsed' : '') + '" id="' + id + '">';
+            if (isObj) {
+                var keys = Object.keys(val);
+                keys.forEach(function(k, i) {
+                    html += _renderNode(val[k], k, i === keys.length - 1, depth + 1);
+                });
+            } else {
+                val.forEach(function(item, i) {
+                    html += _renderNode(item, null, i === val.length - 1, depth + 1);
+                });
+            }
+            html += '</div>';
+            html += '<div class="jt-row"><span class="jt-spacer"></span><span class="jt-bracket">' + close + '</span>' + comma + '</div>';
+        }
+        html += '</div>';
+        return html;
+    }
+
+    // Leaf value
+    var valHtml = '';
+    var typeTag = type;
+    if (type === 'string') {
+        var display = val.length > 120 ? val.substring(0, 120) + '...' : val;
+        valHtml = '<span class="jt-value jt-string" onclick="_jtCopyVal(this)" title="Click to copy">"' + _esc(display) + '"</span>';
+    } else if (type === 'number') {
+        valHtml = '<span class="jt-value jt-number" onclick="_jtCopyVal(this)" title="Click to copy">' + val + '</span>';
+    } else if (type === 'boolean') {
+        valHtml = '<span class="jt-value jt-boolean" onclick="_jtCopyVal(this)" title="Click to copy">' + val + '</span>';
+    } else {
+        valHtml = '<span class="jt-value jt-null" onclick="_jtCopyVal(this)" title="Click to copy">null</span>';
+    }
+
+    return '<div class="jt-node"><div class="jt-row"><span class="jt-spacer"></span>' +
+        keyHtml + valHtml + comma +
+        '<span class="jt-type-tag">' + typeTag + '</span>' +
+        '</div></div>';
+}
+
+var _jtCounter = 0;
+
+function _jsonType(val) {
+    if (val === null) return 'null';
+    if (Array.isArray(val)) return 'array';
+    return typeof val;
+}
+
+function _esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function _jtToggle(id, arrow) {
+    var el = document.getElementById(id);
+    var sum = document.getElementById(id + '-sum');
+    if (!el) return;
+    var collapsed = el.classList.toggle('collapsed');
+    arrow.classList.toggle('collapsed', collapsed);
+    if (sum) sum.style.display = collapsed ? '' : 'none';
+}
+
+function _jtCopyVal(el) {
+    var text = el.textContent;
+    // Strip surrounding quotes for strings
+    if (text.startsWith('"') && text.endsWith('"')) text = text.slice(1, -1);
+    navigator.clipboard.writeText(text);
+    showToast('Copied: ' + (text.length > 40 ? text.substring(0, 40) + '...' : text), 'success');
+}
+
+function treeExpandAll() {
+    document.querySelectorAll('#jsonTreeView .jt-children.collapsed').forEach(function(el) {
+        el.classList.remove('collapsed');
+    });
+    document.querySelectorAll('#jsonTreeView .jt-toggle.collapsed').forEach(function(el) {
+        el.classList.remove('collapsed');
+    });
+    document.querySelectorAll('#jsonTreeView .jt-summary').forEach(function(el) {
+        el.style.display = 'none';
+    });
+}
+
+function treeCollapseAll() {
+    document.querySelectorAll('#jsonTreeView .jt-children').forEach(function(el) {
+        el.classList.add('collapsed');
+    });
+    document.querySelectorAll('#jsonTreeView .jt-toggle').forEach(function(el) {
+        el.classList.add('collapsed');
+    });
+    document.querySelectorAll('#jsonTreeView .jt-summary').forEach(function(el) {
+        el.style.display = '';
+    });
 }
 
 /* --- JSON Path Query --- */

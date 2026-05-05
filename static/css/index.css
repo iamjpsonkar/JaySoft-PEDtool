@@ -232,6 +232,153 @@ textarea.editor:focus {
     padding: 1px 4px;
 }
 
+/* --- JSON Tree Viewer --- */
+.json-tree-container {
+    flex: 1;
+    overflow: auto;
+    padding: 12px 16px;
+    background: var(--surface);
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    line-height: 1.7;
+    color: var(--text);
+    user-select: text;
+}
+
+.jt-node {
+    position: relative;
+    padding-left: 20px;
+}
+
+/* Indent guide lines */
+.jt-node .jt-node {
+    border-left: 1px solid var(--border);
+    margin-left: 2px;
+}
+
+.jt-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0;
+    white-space: nowrap;
+    padding: 0 4px;
+    border-radius: 3px;
+    cursor: default;
+}
+.jt-row:hover {
+    background: var(--primary-light);
+}
+
+/* Toggle arrow */
+.jt-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    font-size: 0.6rem;
+    cursor: pointer;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    border-radius: 3px;
+    transition: all var(--transition);
+    user-select: none;
+    margin-right: 2px;
+}
+.jt-toggle:hover {
+    background: var(--surface-inset);
+    color: var(--primary);
+}
+.jt-toggle.collapsed {
+    transform: rotate(-90deg);
+}
+
+/* Placeholder for non-collapsible items (leaf nodes) */
+.jt-spacer {
+    display: inline-block;
+    width: 18px;
+    flex-shrink: 0;
+}
+
+/* Key name */
+.jt-key {
+    color: var(--text);
+    font-weight: 600;
+    margin-right: 0;
+}
+
+.jt-colon {
+    color: var(--text-muted);
+    margin: 0 4px 0 0;
+}
+
+/* Value types — color coded */
+.jt-string { color: #059669; }
+.jt-number { color: #2563eb; }
+.jt-boolean { color: #d97706; }
+.jt-null { color: #ef4444; font-style: italic; }
+
+[data-theme="dark"] .jt-string { color: #34d399; }
+[data-theme="dark"] .jt-number { color: #60a5fa; }
+[data-theme="dark"] .jt-boolean { color: #fbbf24; }
+[data-theme="dark"] .jt-null { color: #f87171; }
+
+/* Bracket / brace */
+.jt-bracket {
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+/* Collapsed summary */
+.jt-summary {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-style: italic;
+    margin-left: 4px;
+}
+
+/* Children container */
+.jt-children {
+    overflow: hidden;
+}
+.jt-children.collapsed {
+    display: none;
+}
+
+/* Comma after values */
+.jt-comma {
+    color: var(--text-muted);
+}
+
+/* Copy on click */
+.jt-value {
+    cursor: pointer;
+    border-radius: 2px;
+    padding: 0 2px;
+}
+.jt-value:hover {
+    outline: 1px dashed var(--primary);
+    outline-offset: 1px;
+}
+
+/* Type tag */
+.jt-type-tag {
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    background: var(--surface-inset);
+    padding: 0 4px;
+    border-radius: 3px;
+    margin-left: 6px;
+    font-style: normal;
+    font-weight: 500;
+    vertical-align: middle;
+    opacity: 0;
+    transition: opacity var(--transition);
+}
+.jt-row:hover .jt-type-tag {
+    opacity: 1;
+}
+
 /* --- Responsive --- */
 @media (max-width: 700px) {
     .editors { flex-direction: column; }

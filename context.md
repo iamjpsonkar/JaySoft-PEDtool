@@ -512,6 +512,56 @@ Common log prefixes:
 
 ## 23. Changelog (recent)
 
+### 2026-05-05 — Interactive JSON Tree Viewer
+
+**Files changed:** `static/js/index.js`, `static/css/index.css`, `templates/index.html`, `context.md`
+
+**New feature: Interactive JSON Tree View (like jsonviewer.stack.hu)**
+
+Clicking "JSON View" now renders an interactive collapsible tree in the output pane instead of plain text.
+
+**Tree view features:**
+- **Collapsible nodes** — click the arrow to expand/collapse objects and arrays
+- **Auto-collapse** — nodes deeper than 3 levels start collapsed to keep large JSON navigable
+- **Color-coded value types** — strings (green), numbers (blue), booleans (orange), null (red/italic)
+- **Type tags** — faded type label appears on hover per row (string, number, boolean, object, array, null)
+- **Item counts** — collapsed nodes show "N keys" or "N items" summary
+- **Click-to-copy** — click any value to copy it to clipboard (strips quotes for strings)
+- **Indent guide lines** — vertical border-left lines connecting nested levels
+- **Hover highlighting** — row highlights on hover for easy navigation
+- **Expand All / Collapse All** buttons in the pane header
+- **Text View** button switches back to the raw textarea
+- Smart parser: handles non-standard JSON (Python literals, missing colons, single quotes, trailing commas, wrapping quotes)
+
+**CSS additions (index.css):**
+- `.json-tree-container` — scrollable tree wrapper, replaces textarea when active
+- `.jt-node` — tree node with indent guide lines via border-left
+- `.jt-row` — single line with hover highlight
+- `.jt-toggle` — arrow that rotates 90deg when collapsed
+- `.jt-key`, `.jt-colon` — key name and separator styling
+- `.jt-string`, `.jt-number`, `.jt-boolean`, `.jt-null` — type-specific colors with dark mode overrides
+- `.jt-bracket` — muted braces/brackets
+- `.jt-summary` — collapsed item count text
+- `.jt-children` — container that hides when `.collapsed`
+- `.jt-value` — click target with dashed outline on hover
+- `.jt-type-tag` — faded type label, opacity transitions on row hover
+- `.jt-comma` — trailing comma after values
+
+**HTML changes (index.html):**
+- Output pane now contains both `<textarea id="outputEditor">` and `<div id="jsonTreeView">` — toggled by JS
+- Added Expand All, Collapse All, Text View buttons (hidden until tree is active)
+
+**JS additions (index.js):**
+- `_smartParseJson(raw)` — shared parser extracted from jsonView, returns `{data, corrected, errors}`
+- `_showTreeView(data)` — switches output pane to tree mode
+- `showTextView()` — switches back to textarea
+- `_renderNode(val, key, isLast, depth)` — recursive tree HTML builder
+- `_jtToggle(id, arrow)` — expand/collapse handler
+- `_jtCopyVal(el)` — click-to-copy value handler
+- `treeExpandAll()` / `treeCollapseAll()` — bulk expand/collapse
+
+---
+
 ### 2026-05-05 — UI Overhaul + JSON View feature
 
 **Files changed:** `static/css/common.css`, `static/css/index.css`, `static/css/proxy-manage.css`, `static/js/index.js`, `static/js/proxy-manage.js`, `templates/index.html`, `templates/proxy_manage.html`, `templates/proxy_server.html`, `context.md`

@@ -74,16 +74,20 @@
         <div class="resize-handle" id="resizeHandle" title="Drag to resize"></div>
 
         <!-- Output pane -->
-        <div class="editor-pane">
+        <div class="editor-pane" id="outputPane">
             <div class="pane-header">
                 <span class="icon-text"><span class="icon">&#10004;</span> Output</span>
                 <div class="pane-actions">
+                    <button class="btn-sm" id="btnExpandAll" onclick="treeExpandAll()" style="display:none;">Expand All</button>
+                    <button class="btn-sm" id="btnCollapseAll" onclick="treeCollapseAll()" style="display:none;">Collapse All</button>
+                    <button class="btn-sm" id="btnTextView" onclick="showTextView()" style="display:none;">Text View</button>
                     <button class="btn-sm" onclick="copyOutput()">Copy</button>
                     <button class="btn-sm" onclick="moveToInput()">&#8592; To Input</button>
                     <button class="btn-sm" onclick="clearOutput()">Clear</button>
                 </div>
             </div>
             <textarea class="editor" id="outputEditor" placeholder="Results appear here..." readonly spellcheck="false"></textarea>
+            <div class="json-tree-container" id="jsonTreeView" style="display:none;"></div>
         </div>
     </div>
 
