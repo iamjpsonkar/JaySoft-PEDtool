@@ -415,12 +415,17 @@ async function jsonPathQuery() {
 /* --- JSON Diff --- */
 async function jsonDiffTool() {
     const input = inputEl.value.trim();
-    const output = outputEl.value.trim();
     if (!input) { showToast('Put first JSON in Input pane', 'error'); return; }
-    if (!output) { showToast('Put second JSON in Output pane to compare', 'error'); return; }
+
+    // Try output pane first; if empty or showing tree view, prompt for second JSON
+    var second = outputEl.value.trim();
+    if (!second) {
+        second = prompt('Paste the second JSON to compare against:');
+        if (!second) return;
+    }
 
     try {
-        const res = await post('/ped/diff', { a: input, b: output });
+        const res = await post('/ped/diff', { a: input, b: second });
         if (res.error) {
             setOutput('Error: ' + res.error);
             showToast('Diff failed', 'error');
