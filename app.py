@@ -418,6 +418,17 @@ def _ensure_schema_ready() -> None:
                 );
             """)
             logger.info("[STARTUP] Created mock_templates table")
+        # Auto-create suggestions table
+        if "suggestions" not in present:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS suggestions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL DEFAULT 'Anonymous',
+                    message TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+            """)
+            logger.info("[STARTUP] Created suggestions table")
     finally:
         conn.close()
 
@@ -4262,6 +4273,63 @@ def storage_cleanup():
 
 
 # ---------------------------------------------------------------------------
+# Routes — Suggestions
+# ---------------------------------------------------------------------------
+
+
+@app.route("/suggestions/", methods=["POST"])
+@log_access
+def submit_suggestion():
+    """Submit a suggestion (no auth required — anyone can suggest)."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Request body must be JSON"}), 400
+    message = (data.get("message") or "").strip()
+    if not message:
+        return jsonify({"error": "message is required"}), 400
+    if len(message) > 2000:
+        return jsonify({"error": "message too long (max 2000 chars)"}), 400
+    name = (data.get("name") or "Anonymous").strip()[:100]
+
+    db = _get_db()
+    db.execute(
+        "INSERT INTO suggestions (name, message) VALUES (?, ?)",
+        (name, message),
+    )
+    db.commit()
+    logger.info("[SUGGESTION] New from '%s': %s", name, message[:80])
+    return jsonify({"message": "Thank you for your suggestion!", "name": name})
+
+
+@app.route("/suggestions/", methods=["GET"])
+@log_access
+@require_auth
+def list_suggestions():
+    """List all suggestions (auth required)."""
+    db = _get_db()
+    rows = db.execute(
+        "SELECT id, name, message, created_at FROM suggestions ORDER BY id DESC"
+    ).fetchall()
+    suggestions = [dict(r) for r in rows]
+    logger.info("[SUGGESTION] Listed count=%d", len(suggestions))
+    return jsonify({"suggestions": suggestions, "count": len(suggestions)})
+
+
+@app.route("/suggestions/<int:suggestion_id>/", methods=["DELETE"])
+@log_access
+@require_auth
+def delete_suggestion(suggestion_id):
+    """Delete a suggestion (auth required)."""
+    db = _get_db()
+    cur = db.execute("DELETE FROM suggestions WHERE id = ?", (suggestion_id,))
+    db.commit()
+    if cur.rowcount == 0:
+        return jsonify({"error": "Suggestion not found"}), 404
+    logger.info("[SUGGESTION] Deleted id=%d", suggestion_id)
+    return jsonify({"message": "Suggestion deleted", "id": suggestion_id})
+
+
+# ---------------------------------------------------------------------------
 # Routes — Proxy Passthrough
 # ---------------------------------------------------------------------------
 
@@ -4804,6 +4872,14 @@ def proxy_server_page():
 def proxy_manage_page():
     """Protected management dashboard — proxy list, clone, import/export, history."""
     return render_template("proxy_manage.html")
+
+
+@app.route("/suggestions/view/")
+@log_access
+@require_login
+def suggestions_page():
+    """View all user suggestions (auth required)."""
+    return render_template("suggestions.html")
 
 
 # ---------------------------------------------------------------------------

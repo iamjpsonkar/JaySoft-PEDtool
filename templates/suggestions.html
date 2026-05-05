@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PED Tools | Suggestions</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/proxy-manage.css">
+</head>
+<body>
+    <div class="topbar">
+        <h1>Suggestions <span class="page-subtitle">User Feedback</span></h1>
+        <a href="/proxy/manage/">Manage</a>
+        <a href="/proxy/">Mock Builder</a>
+        <a href="/">Home</a>
+        <span class="nav-spacer"></span>
+        <span class="topbar-author">by Jay Prakash Sonkar</span>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+        <a href="/logout">Logout</a>
+    </div>
+
+    <div class="page">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="icon-text"><span class="icon">&#128172;</span> User Suggestions</h2>
+                <div class="action-bar">
+                    <button class="btn btn-blue btn-sm" onclick="loadSuggestions()">Refresh</button>
+                    <span id="suggestionCount" style="font-size:0.82rem;color:var(--text-muted);"></span>
+                </div>
+            </div>
+            <div id="suggestionsContainer">
+                <div class="loading-state"><span class="spinner"></span> Loading suggestions...</div>
+            </div>
+        </div>
+
+        <div class="page-footer">
+            PED Tools &mdash; Proxy, Mock &amp; JSON Workbench &mdash; Built by Jay Prakash Sonkar
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="/static/js/common.js"></script>
+    <script>
+    async function loadSuggestions() {
+        var container = document.getElementById('suggestionsContainer');
+        container.innerHTML = '<div class="loading-state"><span class="spinner"></span> Loading...</div>';
+        try {
+            var data = await api('/suggestions/', 'GET');
+            var items = data.suggestions || [];
+            document.getElementById('suggestionCount').textContent = items.length + ' suggestion(s)';
+            if (items.length === 0) {
+                container.innerHTML = '<div class="empty-state"><p>No suggestions yet.</p></div>';
+                return;
+            }
+            var html = '';
+            items.forEach(function(s) {
+                html += '<div class="suggestion-card">';
+                html += '<div class="suggestion-card-header">';
+                html += '<strong>' + escapeHtml(s.name || 'Anonymous') + '</strong>';
+                html += '<span class="suggestion-time">' + escapeHtml(s.created_at || '') + '</span>';
+                html += '<button class="btn btn-red btn-sm" onclick="deleteSuggestion(' + s.id + ')" style="margin-left:auto;">Delete</button>';
+                html += '</div>';
+                html += '<div class="suggestion-card-body">' + escapeHtml(s.message) + '</div>';
+                html += '</div>';
+            });
+            container.innerHTML = html;
+        } catch (err) {
+            handleApiError(err);
+            container.innerHTML = '<div class="empty-state"><p>Failed to load suggestions.</p></div>';
+        }
+    }
+
+    async function deleteSuggestion(id) {
+        if (!confirm('Delete this suggestion?')) return;
+        try {
+            await api('/suggestions/' + id + '/', 'DELETE');
+            showToast('Suggestion deleted', 'success');
+            loadSuggestions();
+        } catch (err) { handleApiError(err); }
+    }
+
+    document.addEventListener('DOMContentLoaded', loadSuggestions);
+    </script>
+    <script>
+    (function(){var t=localStorage.getItem('ped-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);document.querySelector('.theme-toggle').textContent=t==='dark'?'☀️':'🌙'})();
+    function toggleTheme(){var d=document.documentElement,t=d.getAttribute('data-theme')==='dark'?'light':'dark';d.setAttribute('data-theme',t);localStorage.setItem('ped-theme',t);document.querySelector('.theme-toggle').textContent=t==='dark'?'☀️':'🌙'}
+    </script>
+    <style>
+    .suggestion-card {
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        margin-bottom: 12px;
+        overflow: hidden;
+        transition: border-color var(--transition);
+    }
+    .suggestion-card:hover { border-color: var(--primary); }
+    .suggestion-card-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 16px;
+        background: var(--surface-inset);
+        border-bottom: 1px solid var(--border);
+        font-size: 0.85rem;
+    }
+    .suggestion-time {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+    }
+    .suggestion-card-body {
+        padding: 12px 16px;
+        font-size: 0.88rem;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        color: var(--text);
+    }
+    </style>
+</body>
+</html>

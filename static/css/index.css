@@ -480,6 +480,32 @@ textarea.editor:focus {
     opacity: 1;
 }
 
+/* --- Suggestion FAB --- */
+.suggestion-fab {
+    position: fixed;
+    bottom: 24px;
+    left: 24px;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: white;
+    border: none;
+    font-size: 1.3rem;
+    cursor: pointer;
+    box-shadow: var(--shadow-lg);
+    z-index: 200;
+    transition: all var(--transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.suggestion-fab:hover {
+    background: var(--primary-hover);
+    transform: scale(1.1);
+    box-shadow: var(--shadow-xl);
+}
+
 /* --- Responsive --- */
 @media (max-width: 700px) {
     .editors { flex-direction: column; }

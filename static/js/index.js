@@ -961,6 +961,32 @@ function wrapUnwrap(panel) {
     showToast('Wrapped in array', 'success');
 }
 
+/* --- Suggestion Box --- */
+function toggleSuggestionBox() {
+    var box = document.getElementById('suggestionBox');
+    if (box.classList.contains('visible')) {
+        box.classList.remove('visible');
+        box.style.display = 'none';
+    } else {
+        box.style.display = 'flex';
+        box.classList.add('visible');
+    }
+}
+
+async function submitSuggestion() {
+    var name = document.getElementById('suggestionName').value.trim() || 'Anonymous';
+    var message = document.getElementById('suggestionMessage').value.trim();
+    if (!message) { showToast('Please enter a suggestion', 'error'); return; }
+    try {
+        var res = await post('/suggestions/', { name: name, message: message });
+        showToast(res.message || 'Suggestion sent!', 'success');
+        document.getElementById('suggestionMessage').value = '';
+        toggleSuggestionBox();
+    } catch (e) {
+        showToast('Failed to send suggestion', 'error');
+    }
+}
+
 /* --- Keyboard shortcuts --- */
 document.addEventListener('keydown', (e) => {
     // Escape = close diff modal + find bars

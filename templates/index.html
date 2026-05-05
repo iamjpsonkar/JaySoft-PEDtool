@@ -157,6 +157,32 @@
         </div>
     </div>
 
+    <!-- Suggestion FAB + Modal -->
+    <button class="suggestion-fab" onclick="toggleSuggestionBox()" title="Send a suggestion">&#128172;</button>
+    <div id="suggestionBox" class="modal-overlay" onclick="if(event.target===this)toggleSuggestionBox()" style="display:none;">
+        <div class="modal" style="max-width:420px;">
+            <div class="modal-header">
+                <h3>&#128172; Suggestion Box</h3>
+                <button class="modal-close" onclick="toggleSuggestionBox()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size:0.82rem;color:var(--text-secondary);margin:0 0 12px;">Share your feedback, feature requests, or bug reports. We read every suggestion.</p>
+                <div class="field">
+                    <label for="suggestionName">Your Name <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
+                    <input type="text" id="suggestionName" placeholder="Anonymous" />
+                </div>
+                <div class="field">
+                    <label for="suggestionMessage">Message</label>
+                    <textarea id="suggestionMessage" placeholder="What would you like to suggest?" rows="4" style="min-height:100px;"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline btn-sm" onclick="toggleSuggestionBox()">Cancel</button>
+                <button class="btn btn-blue btn-sm" onclick="submitSuggestion()">Send Suggestion</button>
+            </div>
+        </div>
+    </div>
+
     <div id="toast" class="toast"></div>
 
     <script src="/static/js/common.js"></script>
