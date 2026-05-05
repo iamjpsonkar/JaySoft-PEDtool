@@ -984,6 +984,19 @@ function wrapUnwrap(panel) {
     showToast('Wrapped in array', 'success');
 }
 
+/* --- Swap panes --- */
+function swapPanes() {
+    var a = inputEl.value;
+    var b = outputEl.value;
+    inputEl.value = b;
+    outputEl.value = a;
+    updateInputStats();
+    updateOutputStats();
+    showInputTextView();
+    showTextView();
+    showToast('Panels swapped', 'success');
+}
+
 /* --- Pane overflow menu --- */
 function togglePaneMenu(panel) {
     var menu = document.getElementById('paneMenu' + panel);

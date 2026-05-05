@@ -28,6 +28,7 @@
             <div class="card-header">
                 <h2 class="icon-text"><span class="icon">&#128172;</span> User Suggestions</h2>
                 <div class="action-bar">
+                    <input type="text" id="suggestionSearch" placeholder="Search..." oninput="filterSuggestions()" style="width:160px;padding:5px 10px;font-size:0.82rem;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);" />
                     <button class="btn btn-blue btn-sm" onclick="loadSuggestions()">Refresh</button>
                     <span id="suggestionCount" style="font-size:0.82rem;color:var(--text-muted);"></span>
                 </div>
@@ -82,6 +83,14 @@
             showToast('Suggestion deleted', 'success');
             loadSuggestions();
         } catch (err) { handleApiError(err); }
+    }
+
+    function filterSuggestions() {
+        var query = (document.getElementById('suggestionSearch').value || '').trim().toLowerCase();
+        document.querySelectorAll('.suggestion-card').forEach(function(card) {
+            var text = card.textContent.toLowerCase();
+            card.style.display = (!query || text.indexOf(query) >= 0) ? '' : 'none';
+        });
     }
 
     document.addEventListener('DOMContentLoaded', loadSuggestions);

@@ -575,11 +575,28 @@ textarea.editor:focus {
     box-shadow: var(--shadow-xl);
 }
 
+/* --- Swap button (visible on mobile, hidden on desktop) --- */
+.swap-btn {
+    display: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-full);
+    width: 32px; height: 32px;
+    font-size: 1rem;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: all var(--transition);
+    flex-shrink: 0;
+    align-self: center;
+}
+.swap-btn:hover { background: var(--primary-light); color: var(--primary); border-color: var(--primary); }
+
 /* --- Responsive --- */
 @media (max-width: 700px) {
     .editors { flex-direction: column; }
     .editor-pane { border-right: none; border-bottom: 1px solid var(--border); min-height: 35vh; }
     .resize-handle { display: none; }
+    .swap-btn { display: flex; align-items: center; justify-content: center; }
     .toolbar {
         overflow-x: auto;
         flex-wrap: nowrap;

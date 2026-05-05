@@ -14,14 +14,41 @@ function toggleSection(bodyId, chevronId) {
 /* ------------------------------------------------------------------ */
 
 function switchManageTab(name, el) {
-    document.querySelectorAll('.tab-bar-item').forEach(function(t) { t.classList.remove('active'); });
+    document.querySelectorAll('.tab-bar-item').forEach(function(t) {
+        t.classList.remove('active');
+        t.setAttribute('aria-selected', 'false');
+    });
     document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
-    if (el) el.classList.add('active');
+    if (el) {
+        el.classList.add('active');
+        el.setAttribute('aria-selected', 'true');
+    }
     var panel = document.getElementById('tab-' + name);
     if (panel) panel.classList.add('active');
     // Auto-load data if proxy is selected
     if (_selectedProxyId && document.getElementById('historyProxyId').value) {
         _loadInspectorTab(name);
+    }
+}
+
+function tabBarKeyNav(e) {
+    var tabs = Array.from(e.currentTarget.querySelectorAll('[role="tab"]'));
+    var idx = tabs.indexOf(document.activeElement);
+    if (idx < 0) return;
+    var next = -1;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        next = (idx + 1) % tabs.length;
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        next = (idx - 1 + tabs.length) % tabs.length;
+    } else if (e.key === 'Home') {
+        next = 0;
+    } else if (e.key === 'End') {
+        next = tabs.length - 1;
+    }
+    if (next >= 0) {
+        e.preventDefault();
+        tabs[next].focus();
+        tabs[next].click();
     }
 }
 

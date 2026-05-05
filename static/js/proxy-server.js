@@ -677,13 +677,20 @@ async function loadMocks() {
     if (!id) { showToast('Identifier is required', 'error'); return; }
 
     try {
-        var data = await api('/proxy/get/' + encodeURIComponent(id) + '/', 'GET');
-        renderMocksTable(data.mocked_requests || {});
-
+        // Use tag-aware endpoint for richer data
+        var tagData = await api('/proxy/mocks/' + encodeURIComponent(id) + '/', 'GET');
+        var mocksFull = await api('/proxy/get/' + encodeURIComponent(id) + '/', 'GET');
+        _mocksTagMap = {};
+        (tagData.mocks || []).forEach(function(m) {
+            _mocksTagMap[m.endpoint + '::' + m.method] = m.tags || [];
+        });
+        renderMocksTable(mocksFull.mocked_requests || {});
     } catch (e) {
         showToast('Failed to load mocks', 'error');
     }
 }
+
+var _mocksTagMap = {};
 
 // Store loaded mocks so modal/edit/delete can reference them by index
 var _loadedMocks = [];
@@ -708,22 +715,52 @@ function renderMocksTable(mocks) {
         '<thead><tr><th><input type="checkbox" onchange="toggleBulkAll(this)"></th><th>Method</th><th>Endpoint</th><th>Response Preview</th><th>Actions</th></tr></thead><tbody>';
     _loadedMocks.forEach(function(e, idx) {
         var preview = JSON.stringify(e.body);
-        if (preview.length > 100) preview = preview.substring(0, 100) + '...';
+        if (preview.length > 80) preview = preview.substring(0, 80) + '...';
+        var tags = _mocksTagMap[e.endpoint + '::' + e.method] || [];
+        var tagHtml = tags.map(function(t) { return '<span class="tag-pill">' + escapeHtml(t) + '</span>'; }).join('');
         html += '<tr id="mock-row-' + idx + '">' +
             '<td><input type="checkbox" class="bulk-check" data-idx="' + idx + '" onchange="onBulkCheck()"></td>' +
-            '<td><span class="method-badge method-' + escapeAttr(e.method) + '">' + escapeHtml(e.method) + '</span></td>' +
-            '<td style="font-family:var(--mono);font-size:0.82rem;">' + escapeHtml(e.endpoint) + '</td>' +
+            '<td><span class="method-badge method-' + escapeAttr(e.method) + '" title="Method: ' + escapeAttr(e.method) + '">' + escapeHtml(e.method) + '</span></td>' +
+            '<td style="font-family:var(--mono);font-size:0.82rem;">' + escapeHtml(e.endpoint) + (tagHtml ? '<div class="tag-row">' + tagHtml + '</div>' : '') + '</td>' +
             '<td class="mock-preview">' + escapeHtml(preview) + '</td>' +
             '<td style="white-space:nowrap;">' +
                 '<button class="btn btn-outline btn-sm" onclick="viewMockByIdx(' + idx + ')" title="View">View</button> ' +
                 '<button class="btn btn-outline btn-sm" onclick="editMockByIdx(' + idx + ')" title="Edit">Edit</button> ' +
-                '<button class="btn btn-outline btn-sm" onclick="shareMock(' + idx + ')" title="Copy share link">Share</button> ' +
-                '<button class="btn btn-outline btn-sm" id="del-btn-' + idx + '" onclick="confirmDelete(' + idx + ')" title="Delete" style="color:var(--red);border-color:var(--red);">Delete</button>' +
+                '<button class="btn btn-outline btn-sm" onclick="editMockTags(' + idx + ')" title="Tags">Tags</button> ' +
+                '<button class="btn btn-outline btn-sm" onclick="shareMock(' + idx + ')" title="Share">Share</button> ' +
+                '<button class="btn btn-outline btn-sm" id="del-btn-' + idx + '" onclick="confirmDelete(' + idx + ')" title="Delete" style="color:var(--red);border-color:var(--red);">Del</button>' +
             '</td>' +
         '</tr>';
     });
     html += '</tbody></table>';
     container.innerHTML = html;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Mock Tags (Phase 2D)                                              */
+/* ------------------------------------------------------------------ */
+
+async function editMockTags(idx) {
+    var m = _loadedMocks[idx];
+    if (!m) return;
+    var proxyId = document.getElementById('mocks_proxy_id').value.trim();
+    var currentTags = (_mocksTagMap[m.endpoint + '::' + m.method] || []).join(', ');
+    var input = prompt('Edit tags (comma-separated):', currentTags);
+    if (input === null) return;
+    var tags = input.split(',').map(function(t) { return t.trim(); }).filter(Boolean);
+    try {
+        await api('/proxy/mock/tags/', 'POST', {
+            proxy_identifier: proxyId,
+            end_point: m.endpoint,
+            method: m.method,
+            tags: tags
+        });
+        _mocksTagMap[m.endpoint + '::' + m.method] = tags;
+        showToast('Tags updated', 'success');
+        loadMocks();
+    } catch (e) {
+        showToast((e.data && e.data.error) || 'Failed to update tags', 'error');
+    }
 }
 
 /* ------------------------------------------------------------------ */

@@ -94,19 +94,19 @@
                 </div>
             </div>
 
-            <!-- Tab bar -->
-            <div class="tab-bar">
-                <div class="tab-bar-item active" data-tab="history" onclick="switchManageTab('history',this)">History</div>
-                <div class="tab-bar-item" data-tab="state" onclick="switchManageTab('state',this)">State</div>
-                <div class="tab-bar-item" data-tab="snapshots" onclick="switchManageTab('snapshots',this)">Snapshots</div>
-                <div class="tab-bar-item" data-tab="users" onclick="switchManageTab('users',this)">Users</div>
-                <div class="tab-bar-item" data-tab="analytics" onclick="switchManageTab('analytics',this)">Analytics</div>
-                <div class="tab-bar-item" data-tab="health" onclick="switchManageTab('health',this)">Health</div>
-                <div class="tab-bar-item" data-tab="storage" onclick="switchManageTab('storage',this)">Storage</div>
+            <!-- Tab bar (semantic) -->
+            <div class="tab-bar" role="tablist" aria-label="Inspector tabs" onkeydown="tabBarKeyNav(event)">
+                <button class="tab-bar-item active" role="tab" aria-selected="true" aria-controls="tab-history" data-tab="history" onclick="switchManageTab('history',this)">History</button>
+                <button class="tab-bar-item" role="tab" aria-selected="false" aria-controls="tab-state" data-tab="state" onclick="switchManageTab('state',this)">State</button>
+                <button class="tab-bar-item" role="tab" aria-selected="false" aria-controls="tab-snapshots" data-tab="snapshots" onclick="switchManageTab('snapshots',this)">Snapshots</button>
+                <button class="tab-bar-item" role="tab" aria-selected="false" aria-controls="tab-users" data-tab="users" onclick="switchManageTab('users',this)">Users</button>
+                <button class="tab-bar-item" role="tab" aria-selected="false" aria-controls="tab-analytics" data-tab="analytics" onclick="switchManageTab('analytics',this)">Analytics</button>
+                <button class="tab-bar-item" role="tab" aria-selected="false" aria-controls="tab-health" data-tab="health" onclick="switchManageTab('health',this)">Health</button>
+                <button class="tab-bar-item" role="tab" aria-selected="false" aria-controls="tab-storage" data-tab="storage" onclick="switchManageTab('storage',this)">Storage</button>
             </div>
 
             <!-- History Tab -->
-            <div class="tab-panel active" id="tab-history">
+            <div class="tab-panel active" id="tab-history" role="tabpanel" aria-labelledby="tab-history">
                 <div class="inline-form" style="margin-bottom:12px;">
                     <button class="btn btn-blue btn-sm" onclick="loadHistory()">Load History</button>
                     <button class="btn btn-red btn-sm" onclick="clearHistory()">Clear</button>
@@ -149,14 +149,14 @@
             </div>
 
             <!-- State Tab -->
-            <div class="tab-panel" id="tab-state">
+            <div class="tab-panel" id="tab-\1" role="tabpanel">
                 <div id="stateContainer">
                     <div class="empty-state"><p>Select a proxy from the list above to view its state.</p></div>
                 </div>
             </div>
 
             <!-- Snapshots Tab -->
-            <div class="tab-panel" id="tab-snapshots">
+            <div class="tab-panel" id="tab-\1" role="tabpanel">
                 <div class="inline-form" style="margin-bottom:12px;">
                     <button class="btn btn-blue btn-sm" onclick="saveSnapshot()">Save Snapshot</button>
                     <button class="btn btn-outline btn-sm" onclick="loadSnapshots()">Refresh</button>
@@ -167,14 +167,14 @@
             </div>
 
             <!-- Users Tab -->
-            <div class="tab-panel" id="tab-users">
+            <div class="tab-panel" id="tab-\1" role="tabpanel">
                 <div id="usersContainer">
                     <div class="empty-state"><p>Select a proxy to manage its mock simulation users.</p></div>
                 </div>
             </div>
 
             <!-- Analytics Tab -->
-            <div class="tab-panel" id="tab-analytics">
+            <div class="tab-panel" id="tab-\1" role="tabpanel">
                 <div class="inline-form" style="margin-bottom:12px;">
                     <button class="btn btn-blue btn-sm" onclick="loadAnalytics()">Load Analytics</button>
                 </div>
@@ -184,7 +184,7 @@
             </div>
 
             <!-- Health Tab -->
-            <div class="tab-panel" id="tab-health">
+            <div class="tab-panel" id="tab-\1" role="tabpanel">
                 <div class="inline-form" style="margin-bottom:12px;">
                     <button class="btn btn-blue btn-sm" onclick="checkProxyHealth()">Check Health</button>
                 </div>
@@ -194,7 +194,7 @@
             </div>
 
             <!-- Storage Tab -->
-            <div class="tab-panel" id="tab-storage">
+            <div class="tab-panel" id="tab-\1" role="tabpanel">
                 <div class="inline-form" style="margin-bottom:12px;">
                     <button class="btn btn-outline btn-sm" onclick="loadStorageInfo()">Check Storage</button>
                     <button class="btn btn-red btn-sm" onclick="runCleanup()">Cleanup &amp; Vacuum</button>
