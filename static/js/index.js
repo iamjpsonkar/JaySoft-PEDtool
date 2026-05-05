@@ -417,11 +417,12 @@ async function jsonDiffTool() {
     const input = inputEl.value.trim();
     if (!input) { showToast('Put first JSON in Input pane', 'error'); return; }
 
-    // Try output pane first; if empty or showing tree view, prompt for second JSON
     var second = outputEl.value.trim();
     if (!second) {
-        second = prompt('Paste the second JSON to compare against:');
-        if (!second) return;
+        showToast('Paste second JSON in the Output pane, then click Diff again', 'error');
+        showTextView();
+        outputEl.focus();
+        return;
     }
 
     try {
@@ -639,3 +640,4 @@ document.addEventListener('keydown', (e) => {
 /* --- Init --- */
 updateInputStats();
 updateOutputStats();
+outputEl.addEventListener('input', updateOutputStats);
