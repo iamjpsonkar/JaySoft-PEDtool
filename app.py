@@ -4923,6 +4923,14 @@ def handle_exception(exc):
 
 _ensure_schema_ready()
 
+# ---------------------------------------------------------------------------
+# MCP Server Blueprint
+# ---------------------------------------------------------------------------
+
+from mcp_server import mcp_bp
+app.register_blueprint(mcp_bp)
+logger.info("[STARTUP] MCP server registered at /mcp/")
+
 if __name__ == "__main__":
     port = int(os.environ.get("PED_PORT", 8000))
     app.run(host="0.0.0.0", port=port, debug=DEBUG)
