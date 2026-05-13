@@ -1934,7 +1934,27 @@ def _resolve_path_template(template: str, header, json_data, params, url, proxy_
 
     ``"orders.jsonget(orderId)"`` with body ``{"orderId": "O_123"}`` becomes
     ``"orders.O_123"`` — the pattern most useful for mongo-style keys.
+
+    If the entire template is a single resolver expression (e.g. a
+    ``snippet(...)`` call that builds the full dotted path dynamically), it is
+    resolved as a unit without splitting — splitting on ``.`` would break the
+    expression.  The resolved result must be a string.
     """
+    # Fast path: entire template is a self-contained resolver expression.
+    # Splitting by "." would fragment it, so resolve it whole and return.
+    if (
+        (template.startswith("snippet(") and template.endswith(")"))
+        or (template.startswith("jsonget(") and template.endswith(")"))
+        or (template.startswith("dbget(") and template.endswith(")"))
+    ):
+        result = _resolve_value(template, header, json_data, params, url, proxy_id)
+        if result is None:
+            logger.warning("[PATH_TEMPLATE] resolver returned None for template=%r", template)
+            return "null"
+        resolved = str(result)
+        logger.debug("[PATH_TEMPLATE] full-expression template=%r → %r", template, resolved)
+        return resolved
+
     parts = template.split(".")
     out = []
     for p in parts:

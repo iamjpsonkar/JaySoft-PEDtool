@@ -512,6 +512,16 @@ Common log prefixes:
 
 ## 23. Changelog (recent)
 
+### 2026-05-13 — Fix `_resolve_path_template` to handle full-snippet path expressions
+
+**Files changed:** `app.py`
+
+**Summary:** `_resolve_path_template` previously split the path template on `.` before resolving each segment. This broke cases where the entire template was a `snippet(...)`, `jsonget(...)`, or `dbget(...)` expression containing dots inside the call (e.g. `snippet('orders.' + jsonget('orderId') + '.status')`). Added a fast-path check at the top of the function: if the template starts and ends with one of these resolver expression wrappers, resolve it as a unit via `_resolve_value` without splitting. The resolved string (which may contain dots) is then used directly as the dotted path. Added DEBUG logging for the fast-path case.
+
+**Why:** Discovered while seeding AJIO Cash wallet mocks. `_store` ops with snippet-computed paths were silently no-oping because the template was fragmented by `.`-splitting. Fixed using `collection`/`key` format for deployed mocks as a workaround; this code fix enables the documented `snippet(...)` path syntax to work correctly.
+
+---
+
 ### 2026-05-05 — Complete UI Overhaul (5 phases)
 
 **Files changed:** All templates, all CSS, all JS, `app.py`, `bootstrap.py`, `context.md`
