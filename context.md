@@ -512,6 +512,14 @@ Common log prefixes:
 
 ## 23. Changelog (recent)
 
+### 2026-05-13 — Fix `/proxy/get/<id>/` to not return `{}` when proxy row is missing but mocks exist
+
+**Files changed:** `app.py`
+
+**Summary:** `/proxy/get/<identifier>/` previously returned `{}` (200) whenever the `proxies` table had no row for the identifier, even when mocks existed in the `mocks` table. This silently broke the UI on Render cold-starts (DB wiped, mocks re-seeded without re-creating the proxy row). `/proxy/mocks/<identifier>/` was unaffected because it only queries the `mocks` table. Fixed by adding a fallback: if the proxy row is absent but mocks exist, return them with an empty `api_domain` and log a warning so the UI stays functional.
+
+---
+
 ### 2026-05-13 — Fix `_resolve_path_template` to handle full-snippet path expressions
 
 **Files changed:** `app.py`

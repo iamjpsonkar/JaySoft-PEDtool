@@ -3261,12 +3261,27 @@ def list_proxies():
 @log_access
 def get_proxy(identifier):
     proxy = db_get_proxy(identifier)
-    if not proxy:
-        return jsonify({}), 200
-    return jsonify({
-        "api_domain": proxy["api_domain"],
-        "mocked_requests": proxy["mocked_requests"],
-    }), 200
+    if proxy:
+        logger.debug("[GET_PROXY] Found proxy row for '%s', api_domain=%s", identifier, proxy["api_domain"])
+        return jsonify({
+            "api_domain": proxy["api_domain"],
+            "mocked_requests": proxy["mocked_requests"],
+        }), 200
+
+    # Proxy row missing (e.g. DB wiped on restart) but mocks may still be
+    # present if they were re-seeded independently.  Return whatever mocks
+    # exist so the UI stays functional.
+    mocks = db_get_mocks_for_proxy(identifier)
+    if mocks:
+        logger.warning(
+            "[GET_PROXY] proxy row missing for '%s' but %d mock endpoint(s) found — "
+            "returning mocks without api_domain",
+            identifier, len(mocks),
+        )
+        return jsonify({"api_domain": "", "mocked_requests": mocks}), 200
+
+    logger.info("[GET_PROXY] No proxy row and no mocks found for '%s'", identifier)
+    return jsonify({}), 200
 
 
 # ---------------------------------------------------------------------------
